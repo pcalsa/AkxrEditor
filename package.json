@@ -1,0 +1,46 @@
+{
+  "name": "akxreditor",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tiptap/extension-color": "^3.29.0",
+    "@tiptap/extension-font-family": "^3.29.0",
+    "@tiptap/extension-image": "^3.29.0",
+    "@tiptap/extension-table": "^3.29.0",
+    "@tiptap/extension-table-cell": "^3.29.0",
+    "@tiptap/extension-table-header": "^3.29.0",
+    "@tiptap/extension-table-row": "^3.29.0",
+    "@tiptap/extension-text-align": "^3.29.0",
+    "@tiptap/extension-text-style": "^3.29.0",
+    "@tiptap/extension-underline": "^3.29.0",
+    "@tiptap/react": "^3.29.0",
+    "@tiptap/starter-kit": "^3.29.0",
+    "docx": "^9.7.1",
+    "fabric": "^7.4.0",
+    "jszip": "^3.10.1",
+    "jspdf": "^4.2.1",
+    "lucide-react": "^1.27.0",
+    "mammoth": "^1.12.0",
+    "pdfjs-dist": "^6.1.200",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "turndown": "^7.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/turndown": "^5.0.6",
+    "@vitejs/plugin-react": "^6.0.4",
+    "oxlint": "^1.71.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.5"
+  }
+}
