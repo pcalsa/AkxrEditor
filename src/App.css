@@ -86,6 +86,10 @@ textarea {
 }
 
 .topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
   margin-bottom: 20px;
 }
 
@@ -96,8 +100,17 @@ textarea {
   line-height: 1;
 }
 
+.language-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #dcd5ec;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .mode-panel {
-  max-height: calc(100vh - 112px);
+  height: calc(100vh - 112px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -105,6 +118,125 @@ textarea {
   border-radius: 20px;
   background: rgba(22, 17, 34, 0.78);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.editor-command-strip {
+  position: sticky;
+  top: 0;
+  z-index: 70;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  background:
+    linear-gradient(90deg, rgba(118, 82, 255, 0.2), rgba(217, 50, 104, 0.12), rgba(47, 184, 255, 0.12)),
+    rgba(21, 16, 33, 0.97);
+}
+
+.editor-language-picker {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.command-spacer {
+  flex: 1 1 auto;
+}
+
+.editor-workbench {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(176px, 218px) minmax(0, 1fr) minmax(172px, 214px);
+  gap: 14px;
+  padding: 14px;
+}
+
+.editor-center {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(8, 7, 12, 0.22);
+}
+
+.editor-rail {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.035)),
+    rgba(15, 12, 23, 0.82);
+}
+
+.rail-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.rail-section .tool-button {
+  flex: 1 1 100%;
+  justify-content: flex-start;
+}
+
+.rail-section select {
+  width: 100%;
+  max-width: none;
+}
+
+.rail-section .font-size-control,
+.rail-section .range-control,
+.rail-section .export-menu {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.rail-section .font-size-control {
+  align-items: stretch;
+}
+
+.rail-section .range-control input {
+  width: 100%;
+  min-width: 0;
+}
+
+.rail-section .export-menu-with-name {
+  flex-wrap: wrap;
+}
+
+.rail-section .export-file-name {
+  width: 100%;
+}
+
+.rail-spacer {
+  flex: 1 1 auto;
+  min-height: 6px;
+}
+
+.export-rail-section {
+  margin-top: auto;
+}
+
+.compact-icons {
+  align-items: flex-start;
 }
 
 .ribbon {
@@ -269,6 +401,12 @@ option {
 .export-menu-with-name {
   gap: 6px;
   padding-right: 6px;
+  align-items: flex-start;
+}
+
+.export-menu-with-name > svg {
+  flex: 0 0 auto;
+  margin-top: 6px;
 }
 
 .export-file-name {
@@ -283,12 +421,12 @@ option {
 }
 
 .font-size-control {
-  min-height: 36px;
+  min-height: 46px;
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 7px;
-  padding: 0 9px;
+  padding: 7px 9px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
   color: #f8f5ff;
@@ -296,14 +434,18 @@ option {
 }
 
 .font-size-field,
-.font-size-slider-wrap {
+.font-size-select {
   display: inline-flex;
   align-items: center;
   gap: 7px;
 }
 
+.font-size-field {
+  flex: 0 0 auto;
+}
+
 .font-size-control input {
-  min-height: 26px;
+  min-height: 30px;
   border: 0;
   border-radius: 7px;
   padding: 0 6px;
@@ -311,61 +453,25 @@ option {
 }
 
 .font-size-control input[type='number'] {
-  width: 72px;
+  width: 48px;
   box-sizing: border-box;
   color: #171224;
   background: #ffffff;
+  text-align: center;
 }
 
-.font-size-slider-wrap {
-  min-width: 152px;
+.font-size-select {
+  flex: 1 1 84px;
+  max-width: none;
+  min-height: 32px;
+  padding-left: 8px;
+  color: #f8f5ff;
+  background: rgba(255, 255, 255, 0.1);
 }
 
-.font-size-control .font-size-slider {
-  width: 118px;
-  min-width: 118px;
-  min-height: 26px;
-  padding: 0;
-  accent-color: #d93268;
-  background: transparent;
-  cursor: pointer;
-}
-
-.font-size-control span,
-.font-size-slider-wrap output {
+.font-size-control span {
   font-size: 12px;
   color: #cfc6df;
-}
-
-.font-size-slider-wrap output {
-  width: 27px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.font-size-preset-table {
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(6, minmax(34px, 1fr));
-  gap: 4px;
-  padding-top: 2px;
-}
-
-.font-size-preset-table button {
-  min-height: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  color: #f8f5ff;
-  background: rgba(255, 255, 255, 0.07);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
-
-.font-size-preset-table button:hover,
-.font-size-preset-table button.active {
-  border-color: rgba(217, 50, 104, 0.56);
-  background: rgba(217, 50, 104, 0.24);
 }
 
 .hidden-input {
@@ -422,6 +528,15 @@ option {
   color: #ffffff;
   border-color: rgba(139, 92, 255, 0.62);
   background: linear-gradient(135deg, rgba(139, 92, 255, 0.38), rgba(217, 50, 104, 0.18));
+}
+
+.page-tab-group.dragging {
+  opacity: 0.48;
+}
+
+.page-tab-group.drag-over {
+  border-color: rgba(47, 184, 255, 0.78);
+  box-shadow: 0 0 0 2px rgba(47, 184, 255, 0.22);
 }
 
 .add-page-tab {
@@ -936,6 +1051,41 @@ option {
 
   .paper {
     max-width: none;
+  }
+
+  .mode-panel {
+    height: calc(100vh - 120px);
+  }
+
+  .editor-command-strip {
+    flex-wrap: wrap;
+  }
+
+  .command-spacer {
+    display: none;
+  }
+
+  .editor-workbench {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .editor-center {
+    min-height: 70vh;
+    order: 2;
+  }
+
+  .editor-rail {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .editor-rail-left {
+    order: 1;
+  }
+
+  .editor-rail-right {
+    order: 3;
   }
 
   .ProseMirror,

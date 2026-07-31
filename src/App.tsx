@@ -44,8 +44,10 @@ import {
   Underline as UnderlineIcon,
   Undo2,
   Upload,
+  X,
 } from 'lucide-react'
 import {
+  ActiveSelection,
   Canvas as FabricCanvas,
   Circle,
   Control,
@@ -89,10 +91,14 @@ type SelectedTarget =
   | { kind: 'paint'; pageId: string }
   | { kind: 'table-cell'; pageId: string; cellIndex: number }
   | { kind: 'text'; pageId: string }
+type PageContextTarget = { kind: 'page'; pageId: string }
+type ContextMenuTarget = SelectedTarget | PageContextTarget
+type CanvasPoint = { x: number; y: number }
 type ContextMenuState = {
+  pastePoint?: CanvasPoint
+  target: ContextMenuTarget
   x: number
   y: number
-  target: SelectedTarget
 }
 type FloatingImage = {
   id: string
@@ -129,6 +135,7 @@ type PendingImageExport = {
 }
 
 const exportFormats: ExportFormat[] = ['pdf', 'docx', 'txt', 'md', 'html', 'png', 'jpg']
+const canvasObjectCustomProperties = ['akxrObjectType', 'akxrTableCellCount', 'akxrTableCellWidth', 'akxrTextMode']
 const defaultFontSize = '12px'
 const fontSizes = ['8px', '10px', '12px', '14px', '16px', '18px', '20px', '24px', '32px', '48px', '72px']
 const fontFamilies = ['Calibri', 'Cambria', 'Arial', 'Georgia', 'Courier New', 'Times New Roman']
@@ -143,6 +150,7 @@ const translations = {
     addA5Page: 'Add A5 page',
     addImage: 'Add image',
     addImagePage: 'Add image page',
+    addPdfPages: 'Add PDF pages',
     alignCenter: 'Align center',
     alignLeft: 'Align left',
     alignRight: 'Align right',
@@ -169,11 +177,13 @@ const translations = {
     converted: 'Converted {file} to {format}.',
     converting: 'Converting in your browser...',
     couldNotAddImagePage: 'Could not add that image page.',
+    couldNotAddPdfPages: 'Could not add that PDF.',
     couldNotExportCanvas: 'Could not export the canvas.',
     couldNotExport: 'Could not export this document.',
     couldNotLoadImage: 'Could not load that image.',
     couldNotOpen: 'Could not open that file.',
     couldNotReadFile: 'Could not read that file.',
+    copy: 'Copy',
     delete: 'Delete',
     deleteCell: 'Delete cell',
     deletePage: 'Delete page',
@@ -217,6 +227,7 @@ const translations = {
     paintFront: 'Paint front',
     paragraph: 'Paragraph',
     pdfDocxExtractedOnly: 'PDF to DOCX exports extracted text only.',
+    paste: 'Paste',
     placeText: 'Place text',
     rectangle: 'Rectangle',
     redo: 'Redo',
@@ -242,12 +253,14 @@ const translations = {
     unsupportedSourceFile: 'Unsupported source file. Use DOCX, PDF, TXT, MD, HTML, PNG, or JPG.',
     unsavedWarning: 'Are you sure you want to reload? You will lose all unsaved changes.',
     write: 'Write',
+    xShape: 'X',
   },
   de: {
     addA4Page: 'A4-Seite hinzufugen',
     addA5Page: 'A5-Seite hinzufugen',
     addImage: 'Bild hinzufugen',
     addImagePage: 'Bildseite hinzufugen',
+    addPdfPages: 'PDF-Seiten hinzufugen',
     alignCenter: 'Zentriert ausrichten',
     alignLeft: 'Links ausrichten',
     alignRight: 'Rechts ausrichten',
@@ -274,11 +287,13 @@ const translations = {
     converted: '{file} wurde in {format} konvertiert.',
     converting: 'Konvertierung im Browser...',
     couldNotAddImagePage: 'Diese Bildseite konnte nicht hinzugefugt werden.',
+    couldNotAddPdfPages: 'Diese PDF konnte nicht hinzugefugt werden.',
     couldNotExportCanvas: 'Die Zeichenflache konnte nicht exportiert werden.',
     couldNotExport: 'Dieses Dokument konnte nicht exportiert werden.',
     couldNotLoadImage: 'Dieses Bild konnte nicht geladen werden.',
     couldNotOpen: 'Diese Datei konnte nicht geoffnet werden.',
     couldNotReadFile: 'Diese Datei konnte nicht gelesen werden.',
+    copy: 'Kopieren',
     delete: 'Loschen',
     deleteCell: 'Zelle loschen',
     deletePage: 'Seite loschen',
@@ -322,6 +337,7 @@ const translations = {
     paintFront: 'Zeichnung nach vorne',
     paragraph: 'Absatz',
     pdfDocxExtractedOnly: 'PDF zu DOCX exportiert nur extrahierten Text.',
+    paste: 'Einfugen',
     placeText: 'Text platzieren',
     rectangle: 'Rechteck',
     redo: 'Wiederholen',
@@ -347,6 +363,7 @@ const translations = {
     unsupportedSourceFile: 'Nicht unterstutzte Quelldatei. Verwende DOCX, PDF, TXT, MD, HTML, PNG oder JPG.',
     unsavedWarning: 'Mochtest du wirklich neu laden? Alle nicht gespeicherten Anderungen gehen verloren.',
     write: 'Schreiben',
+    xShape: 'X',
   },
   ar: {
     cancel: 'الغاء',
@@ -371,6 +388,7 @@ const translations = {
     addA5Page: 'اضافة صفحة A5',
     addImage: 'اضافة صورة',
     addImagePage: 'اضافة صفحة صورة',
+    addPdfPages: 'اضافة صفحات PDF',
     alignCenter: 'محاذاة للوسط',
     alignLeft: 'محاذاة لليسار',
     alignRight: 'محاذاة لليمين',
@@ -391,8 +409,10 @@ const translations = {
     converted: 'تم تحويل {file} الى {format}.',
     converting: 'جار التحويل في المتصفح...',
     couldNotAddImagePage: 'تعذر اضافة صفحة الصورة.',
+    couldNotAddPdfPages: 'تعذر اضافة ملف PDF.',
     couldNotExport: 'تعذر تصدير هذا المستند.',
     couldNotOpen: 'تعذر فتح هذا الملف.',
+    copy: 'نسخ',
     delete: 'حذف',
     deleteCell: 'حذف الخلية',
     deletePage: 'حذف الصفحة',
@@ -428,6 +448,7 @@ const translations = {
     paintFront: 'الرسم للامام',
     paragraph: 'فقرة',
     pdfDocxExtractedOnly: 'تصدير PDF الى DOCX يستخرج النص فقط.',
+    paste: 'لصق',
     placeText: 'وضع نص',
     rectangle: 'مستطيل',
     redo: 'اعادة',
@@ -452,6 +473,7 @@ const translations = {
     unavailableConversion: 'هذا التحويل غير متاح في المتصفح.',
     unsavedWarning: 'هل انت متاكد من اعادة التحميل؟ ستفقد كل التغييرات غير المحفوظة.',
     write: 'كتابة',
+    xShape: 'X',
   },
 } satisfies Record<AppLanguage, Record<string, string>>
 type TranslationKey = keyof typeof translations.en
@@ -651,6 +673,31 @@ function App() {
     window.setTimeout(() => scrollToPage(nextPage.id), 0)
   }
 
+  const addPdfPages = async (file: File) => {
+    const nextPages = await pagesFromPdf(file)
+    const firstPageId = nextPages[0]?.id
+    if (!firstPageId) return
+    recordPagesHistory()
+    markUnsaved()
+    setPages((currentPages) => [...currentPages, ...nextPages])
+    setActivePageId(firstPageId)
+    editor?.commands.setContent(nextPages[0].html)
+    window.setTimeout(() => scrollToPage(firstPageId), 0)
+  }
+
+  const fillPageImageWithBucket = async (pageId: string, x: number, y: number, fillColor: string) => {
+    const page = pageDataRef.current.find((item) => item.id === pageId)
+    if (!page?.pageImage) return false
+    const size = pageSizeFor(page.size)
+    const nextPageImage = await floodFillImageDataUrl(page.pageImage, x, y, size.width, size.height, fillColor)
+    if (!nextPageImage) return false
+    if (nextPageImage === page.pageImage) return true
+    recordPagesHistory()
+    markUnsaved()
+    setPages((currentPages) => currentPages.map((item) => (item.id === pageId ? { ...item, pageImage: nextPageImage } : item)))
+    return true
+  }
+
   const deletePage = (pageId: string) => {
     if (pages.length <= 1) return
     markUnsaved()
@@ -661,6 +708,20 @@ function App() {
     setPages(nextPages)
     setActivePageId(nextActivePageId)
     window.setTimeout(() => scrollToPage(nextActivePageId), 0)
+  }
+
+  const reorderPage = (draggedPageId: string, targetPageId: string) => {
+    if (draggedPageId === targetPageId) return
+    markUnsaved()
+    setPages((currentPages) => {
+      const fromIndex = currentPages.findIndex((page) => page.id === draggedPageId)
+      const toIndex = currentPages.findIndex((page) => page.id === targetPageId)
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return currentPages
+      const nextPages = [...currentPages]
+      const [draggedPage] = nextPages.splice(fromIndex, 1)
+      nextPages.splice(toIndex, 0, draggedPage)
+      return nextPages
+    })
   }
 
   const updateImage = (pageId: string, imageId: string, patch: Partial<FloatingImage>) => {
@@ -744,16 +805,18 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <h1>AKXREDITOR</h1>
-          <label className="language-picker">
-            <span>{t('language')}</span>
-            <select aria-label={t('language')} onChange={(event) => setLanguage(event.target.value as AppLanguage)} value={language}>
-              {languages.map((item) => (
-                <option key={item.code} value={item.code}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {mode !== 'editor' && (
+            <label className="language-picker">
+              <span>{t('language')}</span>
+              <select aria-label={t('language')} onChange={(event) => setLanguage(event.target.value as AppLanguage)} value={language}>
+                {languages.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </header>
 
         {mode === 'editor' && (
@@ -762,6 +825,7 @@ function App() {
             addImageToActivePage={addImageToActivePage}
             addImagePage={addImagePage}
             addPage={addPage}
+            addPdfPages={addPdfPages}
             deletePage={deletePage}
             editor={editor}
             pages={pages}
@@ -770,11 +834,15 @@ function App() {
             recordPagesHistory={recordPagesHistory}
             markUnsaved={markUnsaved}
             redoPagesChange={redoPagesChange}
+            reorderPage={reorderPage}
             setActivePageId={setActivePageId}
             undoPagesChange={undoPagesChange}
             updateImage={updateImage}
             deleteImage={deleteImage}
+            fillPageImageWithBucket={fillPageImageWithBucket}
             moveImageLayer={moveImageLayer}
+            language={language}
+            setLanguage={setLanguage}
             t={t}
           />
         )}
@@ -818,6 +886,7 @@ function EditorMode({
   addImageToActivePage,
   addImagePage,
   addPage,
+  addPdfPages,
   deletePage,
   editor,
   pages,
@@ -826,17 +895,22 @@ function EditorMode({
   recordPagesHistory,
   markUnsaved,
   redoPagesChange,
+  reorderPage,
   setActivePageId,
   undoPagesChange,
   updateImage,
   deleteImage,
+  fillPageImageWithBucket,
   moveImageLayer,
+  language,
+  setLanguage,
   t,
 }: {
   activePageId: string
   addImageToActivePage: (src: string, width?: number, height?: number) => void
   addImagePage: (file: File) => Promise<void>
   addPage: (size?: PageSizeKey) => void
+  addPdfPages: (file: File) => Promise<void>
   deletePage: (pageId: string) => void
   editor: Editor | null
   pages: PageData[]
@@ -845,22 +919,28 @@ function EditorMode({
   recordPagesHistory: () => void
   markUnsaved: () => void
   redoPagesChange: () => boolean
+  reorderPage: (draggedPageId: string, targetPageId: string) => void
   setActivePageId: (pageId: string) => void
   undoPagesChange: () => boolean
   updateImage: (pageId: string, imageId: string, patch: Partial<FloatingImage>) => void
   deleteImage: (pageId: string, imageId: string) => void
+  fillPageImageWithBucket: (pageId: string, x: number, y: number, fillColor: string) => Promise<boolean>
   moveImageLayer: (pageId: string, imageId: string, direction: 'front' | 'back') => void
+  language: AppLanguage
+  setLanguage: (language: AppLanguage) => void
   t: Translate
 }) {
   const openInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const imagePageInputRef = useRef<HTMLInputElement>(null)
+  const pdfPagesInputRef = useRef<HTMLInputElement>(null)
   const canvasMap = useRef(new Map<string, FabricCanvas>())
   const histories = useRef(new Map<string, string[]>())
   const futures = useRef(new Map<string, string[]>())
   const loadingCanvas = useRef(false)
   const actionHistory = useRef<UndoKind[]>([])
   const redoHistory = useRef<UndoKind[]>([])
+  const fabricClipboard = useRef<FabricObject | null>(null)
   const [tool, setTool] = useState<EditorTool>('write')
   const [layerOrder, setLayerOrder] = useState<LayerKind[]>(['text', 'images', 'paint'])
   const [textColor, setTextColor] = useState('#171224')
@@ -878,6 +958,9 @@ function EditorMode({
   const [selectedTarget, setSelectedTarget] = useState<SelectedTarget | null>(null)
   const [pendingImageExport, setPendingImageExport] = useState<PendingImageExport | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [hasFabricClipboard, setHasFabricClipboard] = useState(false)
+  const [draggedPageId, setDraggedPageId] = useState<string | null>(null)
+  const [dragOverPageId, setDragOverPageId] = useState<string | null>(null)
   const layerZ = {
     text: layerOrder.indexOf('text') + 1,
     images: layerOrder.indexOf('images') + 1,
@@ -915,9 +998,11 @@ function EditorMode({
       fontSize: Number.parseFloat(textFontSize),
       fontStyle: textItalic ? 'italic' : 'normal',
       fontWeight: textBold ? 'bold' : 'normal',
-      left,
+      left: Math.round(left),
       lineHeight: textLineGap,
-      top,
+      noScaleCache: true,
+      objectCaching: false,
+      top: Math.round(top),
       underline: textUnderline,
     })
 
@@ -945,6 +1030,11 @@ function EditorMode({
   const rememberPagesAction = () => {
     recordPagesHistory()
     rememberAction('pages')
+  }
+
+  const rememberPageImageBucketFill = () => {
+    actionHistory.current.push('pages')
+    redoHistory.current = []
   }
 
   const runTextCommand = (command: () => void) => {
@@ -1063,11 +1153,13 @@ function EditorMode({
       object.getObjects().forEach((item) => {
         if (item instanceof IText) {
           item.set(patch)
+          sharpenCanvasText(item)
           item.initDimensions()
         }
       })
     } else {
       object.set(patch)
+      sharpenCanvasText(object)
       object.initDimensions()
     }
     object.setCoords()
@@ -1237,15 +1329,79 @@ function EditorMode({
     }
   }
 
-  const openContextMenu = (event: MouseEvent | React.MouseEvent, target: SelectedTarget) => {
+  const copySelectedCanvasObject = async () => {
+    const targetPageId = selectedTarget?.kind === 'paint' || selectedTarget?.kind === 'table-cell' ? selectedTarget.pageId : activePageId
+    const canvas = canvasMap.current.get(targetPageId)
+    const object = canvas?.getActiveObject()
+    if (!canvas || !object) return false
+    fabricClipboard.current = await object.clone(canvasObjectCustomProperties)
+    setHasFabricClipboard(true)
+    setContextMenu(null)
+    return true
+  }
+
+  const pasteCanvasObject = async (pageId = activePageId, pastePoint?: CanvasPoint) => {
+    const canvas = canvasMap.current.get(pageId)
+    const source = fabricClipboard.current
+    if (!canvas || !source) return false
+    const clone = await source.clone(canvasObjectCustomProperties)
+    const pastedObjects = positionClonedCanvasObject(clone, pastePoint)
+    if (!pastedObjects.length) return false
+
+    loadingCanvas.current = true
+    canvas.discardActiveObject()
+    pastedObjects.forEach((object) => {
+      restorePastedCanvasObject(object, canvas)
+      keepObjectInsideCanvas(object, canvas)
+      canvas.add(object)
+    })
+    loadingCanvas.current = false
+
+    if (pastedObjects.length === 1) {
+      canvas.setActiveObject(pastedObjects[0])
+    } else {
+      canvas.setActiveObject(new ActiveSelection(pastedObjects, { canvas } as Partial<ConstructorParameters<typeof ActiveSelection>[1]>))
+    }
+    setTool('select-paint')
+    moveLayerToFront('paint')
+    setActivePageId(pageId)
+    setSelectedImageId(null)
+    setSelectedTarget({ kind: 'paint', pageId })
+    canvas.requestRenderAll()
+    recordCanvasHistory(pageId, canvas)
+    setContextMenu(null)
+    return true
+  }
+
+  const copyFromContextMenu = () => {
+    void copySelectedCanvasObject()
+  }
+
+  const pasteFromContextMenu = () => {
+    if (!contextMenu || !hasFabricClipboard) return
+    void pasteCanvasObject(contextMenu.target.pageId, contextMenu.pastePoint)
+  }
+
+  const openContextMenu = (event: MouseEvent | React.MouseEvent, target: ContextMenuTarget, pastePoint?: CanvasPoint) => {
     event.preventDefault()
     event.stopPropagation()
+    if (target.kind === 'page' && !fabricClipboard.current) {
+      setContextMenu(null)
+      return
+    }
     setActivePageId(target.pageId)
-    setSelectedTarget(target)
+    if (target.kind === 'page') {
+      setSelectedTarget(null)
+      setSelectedImageId(null)
+      clearCanvasSelection(target.pageId)
+    } else {
+      setSelectedTarget(target)
+    }
     setContextMenu({
+      pastePoint,
+      target,
       x: event.clientX,
       y: event.clientY,
-      target,
     })
   }
 
@@ -1274,7 +1430,7 @@ function EditorMode({
     if (!pagesRef.current) return
     const baseName = safeFileBaseName(requestedBaseName)
     const html = pages.map((page) => page.html).join('<hr>')
-    const text = pages.map((page, index) => `Page ${index + 1}\n${textFromHtml(page.html)}`).join('\n\n')
+    const text = pages.map((page, index) => `${t('page', { number: index + 1 })}\n${textFromHtml(page.html)}`).join('\n\n')
 
     if (format === 'txt') {
       saveBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), exportFileNameFor(baseName, format))
@@ -1340,14 +1496,6 @@ function EditorMode({
     return true
   }
 
-  const clearCanvas = () => {
-    const canvas = activeCanvas()
-    if (!canvas) return
-    canvas.clear()
-    canvas.requestRenderAll()
-    recordCanvasHistory(activePageId, canvas)
-  }
-
   useEffect(() => {
     const closeMenu = () => setContextMenu(null)
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1399,6 +1547,8 @@ function EditorMode({
       const typingTarget = isTypingTarget(target)
       const isUndo = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey
       const isRedo = (event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))
+      const isCopy = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c'
+      const isPaste = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v'
 
       if (isUndo) {
         event.preventDefault()
@@ -1408,6 +1558,16 @@ function EditorMode({
       if (isRedo) {
         event.preventDefault()
         redoLast()
+        return
+      }
+      if (isCopy && !typingTarget && activeCanvas()?.getActiveObject()) {
+        event.preventDefault()
+        void copySelectedCanvasObject()
+        return
+      }
+      if (isPaste && !typingTarget && hasFabricClipboard) {
+        event.preventDefault()
+        void pasteCanvasObject(activePageId)
         return
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && !typingTarget && (selectedTarget || selectedImageId || activeCanvas()?.getActiveObject())) {
@@ -1426,215 +1586,172 @@ function EditorMode({
 
     window.addEventListener('keydown', handleShortcut)
     return () => window.removeEventListener('keydown', handleShortcut)
-  }, [deleteSelectedObject, redoLast, selectedImageId, selectedTarget, tool, undoLast])
+  }, [activePageId, copySelectedCanvasObject, deleteSelectedObject, hasFabricClipboard, pasteCanvasObject, redoLast, selectedImageId, selectedTarget, tool, undoLast])
 
   const textFontSizeNumber = Number.parseFloat(textFontSize)
   const defaultFontSizeNumber = Number.parseFloat(defaultFontSize)
   const visibleTextFontSize = Number.isFinite(textFontSizeNumber) ? Math.round(textFontSizeNumber) : defaultFontSizeNumber
-  const sliderTextFontSize = clamp(visibleTextFontSize, 1, 240)
+  const selectedFontSizePreset = fontSizes.includes(`${visibleTextFontSize}px`) ? `${visibleTextFontSize}px` : ''
 
   return (
     <section className="mode-panel" style={textStyleVars}>
-      <Ribbon title={t('editor')}>
-        <div className="toolbar-grid">
-          <div aria-label={t('files')} className="toolbar-section toolbar-file-section">
-            <ToolButton icon={Upload} label={t('openFile')} onClick={() => openInputRef.current?.click()} />
-            <input
-              accept=".docx,.pdf,.txt,.md,.markdown,.html,.htm,.png,.jpg,.jpeg"
-              className="hidden-input"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) {
-                  void openDocument(file)
-                    .then((nextPages) => {
-                      const source = extensionOf(file.name)
-                      const openedOnlyImages = nextPages.every((page) => page.images.length > 0 && textFromHtml(page.html).trim().length === 0)
-                      setExportFileName(baseNameFromFileName(file.name))
-                      setTool(source === 'pdf' && !openedOnlyImages ? 'write' : openedOnlyImages ? 'select-paint' : 'write')
-                    })
-                    .catch((error) => {
-                      window.alert(localizedErrorMessage(error, t, 'couldNotOpen'))
-                    })
-                }
-                event.currentTarget.value = ''
-              }}
-              ref={openInputRef}
-              type="file"
-            />
-            <ToolButton icon={ImagePlus} label={t('addImage')} onClick={() => imageInputRef.current?.click()} />
-            <input
-              accept="image/*"
-              className="hidden-input"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) void insertImage(file)
-                event.currentTarget.value = ''
-              }}
-              ref={imageInputRef}
-              type="file"
-            />
-          </div>
-          <div aria-label={t('history')} className="toolbar-section">
-            <IconButton icon={Undo2} label={t('undo')} onClick={undoLast} />
-            <IconButton icon={Redo2} label={t('redo')} onClick={redoLast} />
-          </div>
-          <div aria-label={t('textTools')} className="toolbar-section">
+      <div className="editor-command-strip">
+        <ToolButton icon={Upload} label={t('openFile')} onClick={() => openInputRef.current?.click()} />
+        <input
+          accept=".docx,.pdf,.txt,.md,.markdown,.html,.htm,.png,.jpg,.jpeg"
+          className="hidden-input"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) {
+              void openDocument(file)
+                .then((nextPages) => {
+                  const source = extensionOf(file.name)
+                  const openedOnlyImages = nextPages.every((page) => page.images.length > 0 && textFromHtml(page.html).trim().length === 0)
+                  setExportFileName(baseNameFromFileName(file.name))
+                  setTool(source === 'pdf' && !openedOnlyImages ? 'write' : openedOnlyImages ? 'select-paint' : 'write')
+                })
+                .catch((error) => {
+                  window.alert(localizedErrorMessage(error, t, 'couldNotOpen'))
+                })
+            }
+            event.currentTarget.value = ''
+          }}
+          ref={openInputRef}
+          type="file"
+        />
+        <ToolButton icon={ImagePlus} label={t('addImage')} onClick={() => imageInputRef.current?.click()} />
+        <input
+          accept="image/*"
+          className="hidden-input"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) void insertImage(file)
+            event.currentTarget.value = ''
+          }}
+          ref={imageInputRef}
+          type="file"
+        />
+        <label className="language-picker editor-language-picker">
+          <span>{t('language')}</span>
+          <select aria-label={t('language')} onChange={(event) => setLanguage(event.target.value as AppLanguage)} value={language}>
+            {languages.map((item) => (
+              <option key={item.code} value={item.code}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="command-spacer" />
+        <IconButton icon={Undo2} label={t('undo')} onClick={undoLast} />
+        <IconButton icon={Redo2} label={t('redo')} onClick={redoLast} />
+      </div>
+
+      <div className="editor-workbench">
+        <aside className="editor-rail editor-rail-left" aria-label={t('textTools')}>
+          <div className="rail-section">
             <ToolButton active={tool === 'write'} icon={Type} label={t('write')} onClick={() => activateTool('write')} />
             <ToolButton active={tool === 'place-text'} icon={Type} label={t('placeText')} onClick={toggleTextPlacement} />
             <ToolButton active={tool === 'select-text'} icon={Type} label={t('selectText')} onClick={() => activateTool('select-text')} />
-        <select aria-label={t('fontFamily')} onChange={(event) => updateTextFontFamily(event.target.value)} value={textFontFamily}>
-          {fontFamilies.map((family) => (
-            <option key={family} value={family}>
-              {family}
-            </option>
-          ))}
-        </select>
-        <div className="font-size-control" title={t('textSize')}>
-          <label className="font-size-field">
-            <Type size={16} />
-            <input
-              aria-label={t('fontSizeInPixels')}
-              list="font-size-presets"
-              max="240"
-              min="1"
-              onChange={(event) => updateTextFontSize(event.target.value)}
-              step="1"
-              type="number"
-              value={visibleTextFontSize}
-            />
-            <span>px</span>
-          </label>
-          <label className="font-size-slider-wrap">
-            <input
-              aria-label={t('fontSizeSlider')}
-              className="font-size-slider"
-              max="240"
-              min="1"
-              onChange={(event) => updateTextFontSize(event.target.value)}
-              step="1"
-              type="range"
-              value={sliderTextFontSize}
-            />
-            <output>{sliderTextFontSize}</output>
-          </label>
-          <datalist id="font-size-presets">
-            {fontSizes.map((size) => (
-              <option key={size} value={Number.parseFloat(size)} />
-            ))}
-          </datalist>
-          <div aria-label={t('commonFontSizes')} className="font-size-preset-table">
-            {fontSizes.map((size) => {
-              const sizeValue = Number.parseFloat(size)
-              return (
-                <button
-                  aria-label={t('setFontSize', { size: sizeValue })}
-                  className={visibleTextFontSize === sizeValue ? 'active' : ''}
-                  key={size}
-                  onClick={() => updateTextFontSize(size)}
-                  type="button"
-                >
-                  {sizeValue}
-                </button>
-              )
-            })}
           </div>
-        </div>
-        <label className="color-chip" title={t('textColor')}>
-          <Baseline size={16} />
-          <input type="color" onChange={(event) => updateTextColor(event.target.value)} value={textColor} />
-        </label>
-        <label className="range-control" title={t('textGap')}>
-          <Rows3 size={16} />
-          <input min="1" max="2.6" onChange={(event) => updateTextLineGap(Number(event.target.value))} step="0.02" type="range" value={textLineGap} />
-          <span>{textLineGap.toFixed(2)}</span>
-        </label>
+          <div className="rail-section">
+            <select aria-label={t('fontFamily')} onChange={(event) => updateTextFontFamily(event.target.value)} value={textFontFamily}>
+              {fontFamilies.map((family) => (
+                <option key={family} value={family}>
+                  {family}
+                </option>
+              ))}
+            </select>
+            <div className="font-size-control" title={t('textSize')}>
+              <label className="font-size-field">
+                <Type size={16} />
+                <input aria-label={t('fontSizeInPixels')} max="240" min="1" onChange={(event) => updateTextFontSize(event.target.value)} step="1" type="number" value={visibleTextFontSize} />
+                <span>px</span>
+              </label>
+              <select aria-label={t('commonFontSizes')} className="font-size-select" onChange={(event) => updateTextFontSize(event.target.value)} value={selectedFontSizePreset}>
+                {!selectedFontSizePreset && <option value="">{visibleTextFontSize}px</option>}
+                {fontSizes.map((size) => (
+                  <option key={size} value={size}>
+                    {Number.parseFloat(size)}px
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="color-chip" title={t('textColor')}>
+              <Baseline size={16} />
+              <input type="color" onChange={(event) => updateTextColor(event.target.value)} value={textColor} />
+            </label>
+            <label className="range-control" title={t('textGap')}>
+              <Rows3 size={16} />
+              <input min="1" max="2.6" onChange={(event) => updateTextLineGap(Number(event.target.value))} step="0.02" type="range" value={textLineGap} />
+              <span>{textLineGap.toFixed(2)}</span>
+            </label>
           </div>
-          <div aria-label={t('formatting')} className="toolbar-section">
-        <IconButton active={textBold || editor?.isActive('bold')} icon={Bold} label={t('bold')} onClick={toggleTextBold} />
-        <IconButton active={textItalic || editor?.isActive('italic')} icon={Italic} label={t('italic')} onClick={toggleTextItalic} />
-        <IconButton
-          active={textUnderline || editor?.isActive('underline')}
-          icon={UnderlineIcon}
-          label={t('underline')}
-          onClick={toggleTextUnderline}
-        />
-        <select
-          aria-label={t('heading')}
-          onChange={(event) => {
-            const level = Number(event.target.value)
-            runTextCommand(() => {
-              if (level === 0) editor?.chain().focus().setParagraph().run()
-              if (level > 0) editor?.chain().focus().toggleHeading({ level: level as 1 | 2 | 3 }).run()
-            })
-          }}
-        >
-          <option value="0">{t('paragraph')}</option>
-          <option value="1">{t('heading1')}</option>
-          <option value="2">{t('heading2')}</option>
-          <option value="3">{t('heading3')}</option>
-        </select>
-        <IconButton icon={AlignLeft} label={t('alignLeft')} onClick={() => runTextCommand(() => editor?.chain().focus().setTextAlign('left').run())} />
-        <IconButton icon={AlignCenter} label={t('alignCenter')} onClick={() => runTextCommand(() => editor?.chain().focus().setTextAlign('center').run())} />
-        <IconButton icon={AlignRight} label={t('alignRight')} onClick={() => runTextCommand(() => editor?.chain().focus().setTextAlign('right').run())} />
-        <IconButton icon={List} label={t('bulletList')} onClick={() => addMovableText('- ', 'bullet')} />
-        <IconButton icon={ListOrdered} label={t('numberedList')} onClick={() => addMovableText('1. ', 'numbered')} />
-        <IconButton
-          icon={Table2}
-          label={t('insertTable')}
-          onClick={addHorizontalTable}
-        />
+          <div className="rail-section compact-icons" aria-label={t('formatting')}>
+            <IconButton active={textBold || editor?.isActive('bold')} icon={Bold} label={t('bold')} onClick={toggleTextBold} />
+            <IconButton active={textItalic || editor?.isActive('italic')} icon={Italic} label={t('italic')} onClick={toggleTextItalic} />
+            <IconButton active={textUnderline || editor?.isActive('underline')} icon={UnderlineIcon} label={t('underline')} onClick={toggleTextUnderline} />
+            <select
+              aria-label={t('heading')}
+              onChange={(event) => {
+                const level = Number(event.target.value)
+                runTextCommand(() => {
+                  if (level === 0) editor?.chain().focus().setParagraph().run()
+                  if (level > 0) editor?.chain().focus().toggleHeading({ level: level as 1 | 2 | 3 }).run()
+                })
+              }}
+            >
+              <option value="0">{t('paragraph')}</option>
+              <option value="1">{t('heading1')}</option>
+              <option value="2">{t('heading2')}</option>
+              <option value="3">{t('heading3')}</option>
+            </select>
+            <IconButton icon={AlignLeft} label={t('alignLeft')} onClick={() => runTextCommand(() => editor?.chain().focus().setTextAlign('left').run())} />
+            <IconButton icon={AlignCenter} label={t('alignCenter')} onClick={() => runTextCommand(() => editor?.chain().focus().setTextAlign('center').run())} />
+            <IconButton icon={AlignRight} label={t('alignRight')} onClick={() => runTextCommand(() => editor?.chain().focus().setTextAlign('right').run())} />
+            <IconButton icon={List} label={t('bulletList')} onClick={() => addMovableText('- ', 'bullet')} />
+            <IconButton icon={ListOrdered} label={t('numberedList')} onClick={() => addMovableText('1. ', 'numbered')} />
+            <IconButton icon={Table2} label={t('insertTable')} onClick={addHorizontalTable} />
           </div>
-          <div aria-label={t('drawing')} className="toolbar-section">
-        <ToolButton active={tool === 'select-paint'} icon={MousePointer2} label={t('selectPaint')} onClick={() => activateTool('select-paint')} />
-        <IconButton active={tool === 'brush'} icon={Brush} label={t('brush')} onClick={() => activateTool('brush')} />
-        <IconButton active={tool === 'eraser'} icon={Eraser} label={t('eraser')} onClick={() => activateTool('eraser')} />
-        <IconButton active={tool === 'bucket'} icon={PaintBucket} label={t('bucket')} onClick={() => activateTool('bucket')} />
-        <label className="range-control">
-          <PenLine size={16} />
-          <input min="1" max="42" onChange={(event) => setBrushSize(Number(event.target.value))} type="range" value={brushSize} />
-          <span>{brushSize}</span>
-        </label>
-        <label className="color-chip" title={t('strokeColor')}>
-          <Highlighter size={16} />
-          <input onChange={(event) => setStroke(event.target.value)} type="color" value={stroke} />
-        </label>
-        <label className="color-chip" title={t('fillColor')}>
-          <Shapes size={16} />
-          <input onChange={(event) => setFill(event.target.value)} type="color" value={fill} />
-        </label>
-        <IconButton
-          icon={RectangleHorizontal}
-          label={t('rectangle')}
-          onClick={() =>
-            addFabricObject(new Rect({ left: 160, top: 160, width: 190, height: 110, fill, stroke, strokeWidth: 3, rx: 8, ry: 8 }))
-          }
-        />
-        <IconButton icon={CircleIcon} label={t('circle')} onClick={() => addFabricObject(new Circle({ left: 220, top: 150, radius: 64, fill, stroke, strokeWidth: 3 }))} />
-        <IconButton icon={Rows3} label={t('line')} onClick={() => addFabricObject(new Line([150, 230, 470, 300], { stroke, strokeWidth: brushSize, strokeLineCap: 'round' }))} />
-        <IconButton
-          icon={ArrowRight}
-          label={t('arrow')}
-          onClick={() => {
-            const line = new Line([0, 0, 240, 80], { stroke, strokeWidth: brushSize, strokeLineCap: 'round' })
-            const head = new Triangle({ left: 240, top: 80, width: 24, height: 28, fill: stroke, angle: 110, originX: 'center', originY: 'center' })
-            addFabricObject(new Group([line, head], { left: 170, top: 220 }))
-          }}
-        />
-        <IconButton icon={Trash2} label={t('clearDrawing')} onClick={clearCanvas} />
-          </div>
-          <div aria-label={t('arrangeAndExport')} className="toolbar-section">
-        <IconButton active={layerZ.text > layerZ.paint} icon={Type} label={t('textFront')} onClick={() => moveLayerToFront('text')} />
-        <IconButton active={layerZ.paint > layerZ.text} icon={Paintbrush} label={t('paintFront')} onClick={() => moveLayerToFront('paint')} />
-        <IconButton icon={ArrowRight} label={t('selectedToFront')} onClick={() => moveSelectedObjectLayer('front')} />
-        <IconButton icon={Rows3} label={t('selectedToBack')} onClick={() => moveSelectedObjectLayer('back')} />
-        <ExportMenu fileName={exportFileName} formats={exportFormats} onExport={exportDocument} onFileNameChange={setExportFileName} t={t} />
-          </div>
-        </div>
-      </Ribbon>
+        </aside>
+
+        <div className="editor-center">
 
       <div className="page-strip">
         {pages.map((page, index) => (
-          <span className={page.id === activePageId ? 'page-tab-group active' : 'page-tab-group'} key={page.id}>
+          <span
+            className={[
+              page.id === activePageId ? 'page-tab-group active' : 'page-tab-group',
+              page.id === draggedPageId ? 'dragging' : '',
+              page.id === dragOverPageId && page.id !== draggedPageId ? 'drag-over' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            draggable
+            key={page.id}
+            onDragEnd={() => {
+              setDraggedPageId(null)
+              setDragOverPageId(null)
+            }}
+            onDragOver={(event) => {
+              event.preventDefault()
+              if (draggedPageId && draggedPageId !== page.id) setDragOverPageId(page.id)
+            }}
+            onDragStart={(event) => {
+              setDraggedPageId(page.id)
+              setActivePageId(page.id)
+              event.dataTransfer.effectAllowed = 'move'
+              event.dataTransfer.setData('text/plain', page.id)
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              const sourcePageId = draggedPageId ?? event.dataTransfer.getData('text/plain')
+              setDraggedPageId(null)
+              setDragOverPageId(null)
+              if (!sourcePageId || sourcePageId === page.id) return
+              rememberPagesAction()
+              reorderPage(sourcePageId, page.id)
+            }}
+          >
             <button
               className="page-tab"
               onClick={() => {
@@ -1643,7 +1760,7 @@ function EditorMode({
               type="button"
             >
               <span>{t('page', { number: index + 1 })}</span>
-              <span className="page-size-label">{pageSizeFor(page.size).label}</span>
+              <span className="page-size-label">{t(pageSizeTranslationKey(page.size))}</span>
             </button>
             <button
               aria-label={t('deletePageNumber', { number: index + 1 })}
@@ -1669,6 +1786,10 @@ function EditorMode({
           <ImagePlus size={15} />
           {t('addImagePage')}
         </button>
+        <button className="page-tab add-page-tab" onClick={() => pdfPagesInputRef.current?.click()} type="button">
+          <FileText size={15} />
+          {t('addPdfPages')}
+        </button>
         <input
           accept="image/*"
           className="hidden-input"
@@ -1682,6 +1803,21 @@ function EditorMode({
             event.currentTarget.value = ''
           }}
           ref={imagePageInputRef}
+          type="file"
+        />
+        <input
+          accept=".pdf,application/pdf"
+          className="hidden-input"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) {
+              void addPdfPages(file).catch((error) => {
+                window.alert(localizedErrorMessage(error, t, 'couldNotAddPdfPages'))
+              })
+            }
+            event.currentTarget.value = ''
+          }}
+          ref={pdfPagesInputRef}
           type="file"
         />
       </div>
@@ -1711,11 +1847,21 @@ function EditorMode({
               recordCanvasHistory={recordCanvasHistory}
               registerCanvas={registerCanvas}
               onSelectDrawing={handleSelectDrawing}
-              onOpenDrawingContextMenu={(event, tableCellIndex) =>
-                openContextMenu(event, tableCellIndex == null ? { kind: 'paint', pageId: page.id } : { kind: 'table-cell', pageId: page.id, cellIndex: tableCellIndex })
+              onOpenDrawingContextMenu={(event, tableCellIndex, pastePoint, hasTarget) =>
+                openContextMenu(
+                  event,
+                  hasTarget
+                    ? tableCellIndex == null
+                      ? { kind: 'paint', pageId: page.id }
+                      : { kind: 'table-cell', pageId: page.id, cellIndex: tableCellIndex }
+                    : { kind: 'page', pageId: page.id },
+                  pastePoint,
+                )
               }
+              onPageImageBucketFill={rememberPageImageBucketFill}
               pageHeight={pageSize.height}
               pageWidth={pageSize.width}
+              fillPageImageWithBucket={fillPageImageWithBucket}
               textColor={textColor}
               textBold={textBold}
               textFontFamily={textFontFamily}
@@ -1776,6 +1922,7 @@ function EditorMode({
                   }}
                   onOpenContextMenu={(event) => openContextMenu(event, { kind: 'image', pageId: page.id, imageId: image.id })}
                   onChangeStart={() => rememberPagesAction()}
+                  t={t}
                   updateImage={(patch) => updateImageWithHistory(page.id, image.id, patch)}
                 />
               ))}
@@ -1783,6 +1930,65 @@ function EditorMode({
           </article>
           )
         })}
+      </div>
+        </div>
+
+        <aside className="editor-rail editor-rail-right" aria-label={t('drawing')}>
+          <div className="rail-section">
+            <ToolButton active={tool === 'select-paint'} icon={MousePointer2} label={t('selectPaint')} onClick={() => activateTool('select-paint')} />
+            <IconButton active={tool === 'brush'} icon={Brush} label={t('brush')} onClick={() => activateTool('brush')} />
+            <IconButton active={tool === 'eraser'} icon={Eraser} label={t('eraser')} onClick={() => activateTool('eraser')} />
+            <IconButton active={tool === 'bucket'} icon={PaintBucket} label={t('bucket')} onClick={() => activateTool('bucket')} />
+            <label className="range-control">
+              <PenLine size={16} />
+              <input min="1" max="42" onChange={(event) => setBrushSize(Number(event.target.value))} type="range" value={brushSize} />
+              <span>{brushSize}</span>
+            </label>
+            <label className="color-chip" title={t('strokeColor')}>
+              <Highlighter size={16} />
+              <input onChange={(event) => setStroke(event.target.value)} type="color" value={stroke} />
+            </label>
+            <label className="color-chip" title={t('fillColor')}>
+              <Shapes size={16} />
+              <input onChange={(event) => setFill(event.target.value)} type="color" value={fill} />
+            </label>
+          </div>
+          <div className="rail-section compact-icons">
+            <IconButton icon={RectangleHorizontal} label={t('rectangle')} onClick={() => addFabricObject(new Rect({ left: 160, top: 160, width: 190, height: 110, fill, stroke, strokeWidth: 3, rx: 8, ry: 8 }))} />
+            <IconButton icon={CircleIcon} label={t('circle')} onClick={() => addFabricObject(new Circle({ left: 220, top: 150, radius: 64, fill, stroke, strokeWidth: 3 }))} />
+            <IconButton
+              icon={X}
+              label={t('xShape')}
+              onClick={() => {
+                const size = 140
+                const width = Math.max(3, brushSize)
+                const firstStroke = new Line([0, 0, size, size], { stroke, strokeWidth: width, strokeLineCap: 'round' })
+                const secondStroke = new Line([size, 0, 0, size], { stroke, strokeWidth: width, strokeLineCap: 'round' })
+                addFabricObject(new Group([firstStroke, secondStroke], { left: 220, top: 160 }))
+              }}
+            />
+            <IconButton icon={Rows3} label={t('line')} onClick={() => addFabricObject(new Line([150, 230, 470, 300], { stroke, strokeWidth: brushSize, strokeLineCap: 'round' }))} />
+            <IconButton
+              icon={ArrowRight}
+              label={t('arrow')}
+              onClick={() => {
+                const line = new Line([0, 0, 240, 80], { stroke, strokeWidth: brushSize, strokeLineCap: 'round' })
+                const head = new Triangle({ left: 240, top: 80, width: 24, height: 28, fill: stroke, angle: 110, originX: 'center', originY: 'center' })
+                addFabricObject(new Group([line, head], { left: 170, top: 220 }))
+              }}
+            />
+          </div>
+          <div className="rail-section">
+            <IconButton active={layerZ.text > layerZ.paint} icon={Type} label={t('textFront')} onClick={() => moveLayerToFront('text')} />
+            <IconButton active={layerZ.paint > layerZ.text} icon={Paintbrush} label={t('paintFront')} onClick={() => moveLayerToFront('paint')} />
+            <IconButton icon={ArrowRight} label={t('selectedToFront')} onClick={() => moveSelectedObjectLayer('front')} />
+            <IconButton icon={Rows3} label={t('selectedToBack')} onClick={() => moveSelectedObjectLayer('back')} />
+          </div>
+          <span className="rail-spacer" />
+          <div className="rail-section export-rail-section">
+            <ExportMenu fileName={exportFileName} formats={exportFormats} onExport={exportDocument} onFileNameChange={setExportFileName} t={t} />
+          </div>
+        </aside>
       </div>
       {pendingImageExport && (
         <ImageExportConfirmation
@@ -1796,12 +2002,16 @@ function EditorMode({
       {contextMenu && (
         <SelectionContextMenu
           canDeleteCell={contextMenu.target.kind === 'table-cell'}
+          canPaste={hasFabricClipboard}
+          isPageMenu={contextMenu.target.kind === 'page'}
           x={contextMenu.x}
           y={contextMenu.y}
           onBack={() => moveSelectedObjectLayer('back')}
+          onCopy={copyFromContextMenu}
           onDelete={deleteSelectedObject}
           onDeleteCell={deleteSelectedTableCell}
           onFront={() => moveSelectedObjectLayer('front')}
+          onPaste={pasteFromContextMenu}
           t={t}
         />
       )}
@@ -1816,6 +2026,8 @@ function PageCanvas({
   pageHeight,
   pageId,
   pageWidth,
+  fillPageImageWithBucket,
+  onPageImageBucketFill,
   recordCanvasHistory,
   registerCanvas,
   onSelectDrawing,
@@ -1838,10 +2050,12 @@ function PageCanvas({
   pageHeight: number
   pageId: string
   pageWidth: number
+  fillPageImageWithBucket: (pageId: string, x: number, y: number, fillColor: string) => Promise<boolean>
+  onPageImageBucketFill: () => void
   recordCanvasHistory: (pageId: string, canvas: FabricCanvas) => void
   registerCanvas: (pageId: string, canvas: FabricCanvas | null) => void
   onSelectDrawing: (pageId: string, tableCellIndex?: number) => void
-  onOpenDrawingContextMenu: (event: MouseEvent, tableCellIndex?: number) => void
+  onOpenDrawingContextMenu: (event: MouseEvent, tableCellIndex: number | undefined, pastePoint: CanvasPoint, hasTarget: boolean) => void
   textColor: string
   textBold: boolean
   textFontFamily: string
@@ -1868,7 +2082,7 @@ function PageCanvas({
   const fillRef = useRef(fill)
   const strokeRef = useRef(stroke)
   const canSelectPaintRef = useRef(canSelectPaint)
-  const callbacksRef = useRef({ onOpenDrawingContextMenu, onSelectDrawing, recordCanvasHistory })
+  const callbacksRef = useRef({ fillPageImageWithBucket, onOpenDrawingContextMenu, onPageImageBucketFill, onSelectDrawing, recordCanvasHistory })
 
   useEffect(() => {
     activeRef.current = active
@@ -1883,12 +2097,14 @@ function PageCanvas({
     fillRef.current = fill
     strokeRef.current = stroke
     canSelectPaintRef.current = canSelectPaint
-    callbacksRef.current = { onOpenDrawingContextMenu, onSelectDrawing, recordCanvasHistory }
+    callbacksRef.current = { fillPageImageWithBucket, onOpenDrawingContextMenu, onPageImageBucketFill, onSelectDrawing, recordCanvasHistory }
   }, [
     active,
     canSelectPaint,
     fill,
+    fillPageImageWithBucket,
     onOpenDrawingContextMenu,
+    onPageImageBucketFill,
     onSelectDrawing,
     recordCanvasHistory,
     stroke,
@@ -1906,6 +2122,7 @@ function PageCanvas({
     if (!canvasEl.current) return
     const canvas = new FabricCanvas(canvasEl.current, {
       backgroundColor: 'rgba(255,255,255,0)',
+      enableRetinaScaling: true,
       height: pageHeight,
       fireRightClick: true,
       preserveObjectStacking: true,
@@ -1937,14 +2154,18 @@ function PageCanvas({
       const canOpenPaintMenu = canSelectPaintRef.current || toolRef.current === 'place-text'
       if (!activeRef.current || !canOpenPaintMenu || !(event.e instanceof MouseEvent)) return
       const target = event.target ?? canvas.getActiveObject()
-      if (!target) return
+      const pointer = canvas.getScenePoint(event.e)
+      if (!target) {
+        callbacksRef.current.onOpenDrawingContextMenu(event.e, undefined, pointer, false)
+        return
+      }
       const activeObject = canvas.getActiveObject()
       const table = horizontalTableFromTarget(target) ?? horizontalTableFromTarget(activeObject)
-      const tableCellIndex = table ? horizontalTableCellIndexFromPointer(table, canvas.getScenePoint(event.e), event.subTargets ?? [target]) : null
+      const tableCellIndex = table ? horizontalTableCellIndexFromPointer(table, pointer, event.subTargets ?? [target]) : null
       canvas.setActiveObject(table ?? target)
       canvas.requestRenderAll()
       callbacksRef.current.onSelectDrawing(pageId, tableCellIndex ?? undefined)
-      callbacksRef.current.onOpenDrawingContextMenu(event.e, tableCellIndex ?? undefined)
+      callbacksRef.current.onOpenDrawingContextMenu(event.e, tableCellIndex ?? undefined, pointer, true)
     }
     const handleMouseDown = (event: { e: Event; target?: FabricObject; subTargets?: FabricObject[] }) => {
       if (!activeRef.current || !(event.e instanceof MouseEvent)) return
@@ -1960,8 +2181,22 @@ function PageCanvas({
           canvas.setActiveObject(horizontalTableFromTarget(event.target) ?? event.target)
           callbacksRef.current.onSelectDrawing(pageId)
         } else {
-          canvas.backgroundColor = fillRef.current
-          callbacksRef.current.onSelectDrawing(pageId)
+          const pointer = canvas.getScenePoint(event.e)
+          void callbacksRef.current
+            .fillPageImageWithBucket(pageId, pointer.x, pointer.y, fillRef.current)
+            .catch(() => true)
+            .then((filledPageImage) => {
+              if (filledPageImage) {
+                callbacksRef.current.onPageImageBucketFill()
+                callbacksRef.current.onSelectDrawing(pageId)
+                return
+              }
+              canvas.backgroundColor = fillRef.current
+              callbacksRef.current.onSelectDrawing(pageId)
+              canvas.requestRenderAll()
+              callbacksRef.current.recordCanvasHistory(pageId, canvas)
+            })
+          return
         }
         canvas.requestRenderAll()
         callbacksRef.current.recordCanvasHistory(pageId, canvas)
@@ -1983,12 +2218,14 @@ function PageCanvas({
         fontSize: textFontSizeRef.current,
         fontStyle: textItalicRef.current ? 'italic' : 'normal',
         fontWeight: textBoldRef.current ? 'bold' : 'normal',
-        left: clamp(pointer.x, 0, pageWidth - 120),
+        left: Math.round(clamp(pointer.x, 0, pageWidth - 120)),
         lineHeight: textLineGapRef.current,
-        top: clamp(pointer.y, 0, pageHeight - 42),
+        noScaleCache: true,
+        objectCaching: false,
+        top: Math.round(clamp(pointer.y, 0, pageHeight - 42)),
         underline: textUnderlineRef.current,
       })
-      configureManagedText(text, 'plain', canvas, { removeIfEmpty: true })
+      configureManagedText(text, 'plain', canvas)
       canvas.add(text)
       canvas.setActiveObject(text)
       text.enterEditing()
@@ -2050,6 +2287,7 @@ function FloatingImageObject({
   onSelect,
   pageHeight,
   pageWidth,
+  t,
   updateImage,
 }: {
   active: boolean
@@ -2059,6 +2297,7 @@ function FloatingImageObject({
   onSelect: () => void
   pageHeight: number
   pageWidth: number
+  t: Translate
   updateImage: (patch: Partial<FloatingImage>) => void
 }) {
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2167,13 +2406,13 @@ function FloatingImageObject({
       <img alt="" draggable={false} src={image.src} />
       {active && (
         <>
-          <button className="image-handle move-handle" title="Move" type="button">
+          <button className="image-handle move-handle" title={t('move')} type="button">
             <Move size={12} />
           </button>
-          <button className="image-handle resize-horizontal-handle" onPointerDown={startHorizontalResize} title="Resize width" type="button" />
-          <button className="image-handle resize-vertical-handle" onPointerDown={startVerticalResize} title="Resize height" type="button" />
-          <button className="image-handle resize-corner-handle" onPointerDown={startCornerResize} title="Resize proportionally" type="button" />
-          <button className="image-handle rotate-handle" onPointerDown={startRotate} title="Rotate" type="button">
+          <button className="image-handle resize-horizontal-handle" onPointerDown={startHorizontalResize} title={t('resizeWidth')} type="button" />
+          <button className="image-handle resize-vertical-handle" onPointerDown={startVerticalResize} title={t('resizeHeight')} type="button" />
+          <button className="image-handle resize-corner-handle" onPointerDown={startCornerResize} title={t('resizeProportionally')} type="button" />
+          <button className="image-handle rotate-handle" onPointerDown={startRotate} title={t('rotate')} type="button">
             <RotateCw size={12} />
           </button>
         </>
@@ -2184,21 +2423,29 @@ function FloatingImageObject({
 
 function SelectionContextMenu({
   canDeleteCell,
+  canPaste,
+  isPageMenu,
   x,
   y,
   onBack,
+  onCopy,
   onDelete,
   onDeleteCell,
   onFront,
+  onPaste,
   t,
 }: {
   canDeleteCell: boolean
+  canPaste: boolean
+  isPageMenu: boolean
   x: number
   y: number
   onBack: () => void
+  onCopy: () => void
   onDelete: () => void
   onDeleteCell: () => void
   onFront: () => void
+  onPaste: () => void
   t: Translate
 }) {
   return (
@@ -2207,23 +2454,40 @@ function SelectionContextMenu({
       onClick={(event) => event.stopPropagation()}
       style={{
         left: Math.min(x, window.innerWidth - 188),
-        top: Math.min(y, window.innerHeight - 96),
+        top: Math.min(y, window.innerHeight - 196),
       }}
     >
-      <button onClick={onFront} type="button">
-        {t('selectedToFront')}
-      </button>
-      <button onClick={onBack} type="button">
-        {t('selectedToBack')}
-      </button>
-      {canDeleteCell && (
-        <button onClick={onDeleteCell} type="button">
-          {t('deleteCell')}
+      {!isPageMenu && (
+        <>
+          <button onClick={onCopy} type="button">
+            {t('copy')}
+          </button>
+          {canPaste && (
+            <button onClick={onPaste} type="button">
+              {t('paste')}
+            </button>
+          )}
+          <button onClick={onFront} type="button">
+            {t('selectedToFront')}
+          </button>
+          <button onClick={onBack} type="button">
+            {t('selectedToBack')}
+          </button>
+          {canDeleteCell && (
+            <button onClick={onDeleteCell} type="button">
+              {t('deleteCell')}
+            </button>
+          )}
+          <button onClick={onDelete} type="button">
+            {canDeleteCell ? t('deleteTable') : t('delete')}
+          </button>
+        </>
+      )}
+      {isPageMenu && canPaste && (
+        <button onClick={onPaste} type="button">
+          {t('paste')}
         </button>
       )}
-      <button onClick={onDelete} type="button">
-        {canDeleteCell ? t('deleteTable') : t('delete')}
-      </button>
     </div>
   )
 }
@@ -3205,11 +3469,65 @@ function keepObjectInsideCanvas(object: FabricObject, canvas: FabricCanvas) {
 }
 
 function canvasSnapshot(canvas: FabricCanvas) {
-  return JSON.stringify(canvas.toObject(['akxrObjectType', 'akxrTableCellCount', 'akxrTableCellWidth', 'akxrTextMode']))
+  return JSON.stringify(canvas.toObject(canvasObjectCustomProperties))
+}
+
+function positionClonedCanvasObject(object: FabricObject, pastePoint?: CanvasPoint) {
+  const objects = object instanceof ActiveSelection ? object.getObjects() : [object]
+  if (!objects.length) return []
+  const bounds = object.getBoundingRect()
+  const offsetX = pastePoint ? pastePoint.x - bounds.left : 24
+  const offsetY = pastePoint ? pastePoint.y - bounds.top : 24
+  objects.forEach((item) => {
+    item.set({
+      left: Number(item.left ?? 0) + offsetX,
+      top: Number(item.top ?? 0) + offsetY,
+    })
+    item.setCoords()
+  })
+  return objects
+}
+
+function restorePastedCanvasObject(object: FabricObject, canvas: FabricCanvas) {
+  sharpenCanvasText(object)
+  if (isHorizontalTableGroup(object)) {
+    configureHorizontalTableGroup(object, canvas)
+    return
+  }
+  if (object instanceof IText) {
+    const mode = (object as ManagedIText).akxrTextMode
+    if (mode) configureManagedText(object, mode, canvas, { removeIfEmpty: mode === 'plain' })
+  }
+  if (object instanceof Group) {
+    object.getObjects().forEach((item) => restorePastedCanvasObject(item, canvas))
+  }
+}
+
+function sharpenCanvasText(object: FabricObject, options: { snapPosition?: boolean } = {}) {
+  if (object instanceof IText) {
+    object.set({
+      noScaleCache: true,
+      objectCaching: false,
+    })
+    if (options.snapPosition) {
+      object.set({
+        left: Math.round(Number(object.left ?? 0)),
+        top: Math.round(Number(object.top ?? 0)),
+      })
+    }
+    object.initDimensions()
+    object.setCoords()
+    return
+  }
+
+  if (object instanceof Group) {
+    object.getObjects().forEach((item) => sharpenCanvasText(item))
+  }
 }
 
 function restoreManagedCanvasObjects(canvas: FabricCanvas) {
   canvas.getObjects().forEach((object) => {
+    sharpenCanvasText(object)
     if (isHorizontalTableGroup(object)) configureHorizontalTableGroup(object, canvas)
   })
 }
@@ -3222,6 +3540,7 @@ function configureManagedText(
 ) {
   const managed = text as ManagedIText
   managed.akxrTextMode = mode
+  sharpenCanvasText(text, { snapPosition: true })
 
   text.on('changed', () => {
     if (managed.akxrFormattingText) return
@@ -3348,6 +3667,8 @@ function createHorizontalTableGroup({
         fontWeight,
         left: index * cellWidth + cellWidth / 2,
         minWidth: cellWidth - 28,
+        noScaleCache: true,
+        objectCaching: false,
         originX: 'center',
         originY: 'center',
         selectable: true,
@@ -3379,6 +3700,7 @@ function configureHorizontalTableGroup(table: HorizontalTableGroup, canvas: Fabr
   table.akxrObjectType = 'horizontal-table'
   table.akxrTableCellCount = Math.max(table.akxrTableCellCount ?? horizontalTableTextItems(table).length, 1)
   table.akxrTableCellWidth = table.akxrTableCellWidth ?? horizontalTableCellWidth(table)
+  horizontalTableTextItems(table).forEach((text) => sharpenCanvasText(text))
   table.controls = {
     ...table.controls,
     addCell: new Control({
@@ -3505,6 +3827,100 @@ function applyPaintBucketFill(object: FabricObject, fill: string) {
   object.set({ fill })
 }
 
+async function floodFillImageDataUrl(dataUrl: string, pageX: number, pageY: number, pageWidth: number, pageHeight: number, fill: string) {
+  const image = await loadImage(dataUrl)
+  const canvas = document.createElement('canvas')
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas rendering is not available in this browser.')
+  canvas.width = image.naturalWidth
+  canvas.height = image.naturalHeight
+  context.drawImage(image, 0, 0)
+
+  const x = clamp(Math.floor((pageX / pageWidth) * canvas.width), 0, canvas.width - 1)
+  const y = clamp(Math.floor((pageY / pageHeight) * canvas.height), 0, canvas.height - 1)
+  const fillColor = hexColorToRgba(fill)
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+  const data = imageData.data
+  const startIndex = (y * canvas.width + x) * 4
+  const targetColor = [data[startIndex], data[startIndex + 1], data[startIndex + 2], data[startIndex + 3]]
+  if (colorsClose(targetColor, fillColor, 0)) return dataUrl
+
+  const tolerance = 28
+  const pixelCount = canvas.width * canvas.height
+  const visited = new Uint8Array(pixelCount)
+  const stack = new Int32Array(pixelCount)
+  let stackLength = 1
+  let changed = false
+  stack[0] = y * canvas.width + x
+  visited[stack[0]] = 1
+
+  while (stackLength > 0) {
+    stackLength -= 1
+    const pixel = stack[stackLength]
+    const dataIndex = pixel * 4
+    const currentColor = [data[dataIndex], data[dataIndex + 1], data[dataIndex + 2], data[dataIndex + 3]]
+    if (!colorsClose(currentColor, targetColor, tolerance)) continue
+
+    data[dataIndex] = fillColor[0]
+    data[dataIndex + 1] = fillColor[1]
+    data[dataIndex + 2] = fillColor[2]
+    data[dataIndex + 3] = fillColor[3]
+    changed = true
+
+    const px = pixel % canvas.width
+    const left = pixel - 1
+    const right = pixel + 1
+    const up = pixel - canvas.width
+    const down = pixel + canvas.width
+    if (px > 0 && !visited[left]) {
+      visited[left] = 1
+      stack[stackLength] = left
+      stackLength += 1
+    }
+    if (px < canvas.width - 1 && !visited[right]) {
+      visited[right] = 1
+      stack[stackLength] = right
+      stackLength += 1
+    }
+    if (pixel >= canvas.width && !visited[up]) {
+      visited[up] = 1
+      stack[stackLength] = up
+      stackLength += 1
+    }
+    if (pixel < canvas.width * (canvas.height - 1) && !visited[down]) {
+      visited[down] = 1
+      stack[stackLength] = down
+      stackLength += 1
+    }
+  }
+
+  if (!changed) return dataUrl
+  context.putImageData(imageData, 0, 0)
+  return canvas.toDataURL('image/png')
+}
+
+function hexColorToRgba(color: string) {
+  const hex = color.trim().replace(/^#/, '')
+  if (/^[0-9a-f]{6}$/i.test(hex)) {
+    return [
+      Number.parseInt(hex.slice(0, 2), 16),
+      Number.parseInt(hex.slice(2, 4), 16),
+      Number.parseInt(hex.slice(4, 6), 16),
+      255,
+    ]
+  }
+  return [0, 0, 0, 255]
+}
+
+function colorsClose(a: number[], b: number[], tolerance: number) {
+  return (
+    Math.abs(a[0] - b[0]) <= tolerance &&
+    Math.abs(a[1] - b[1]) <= tolerance &&
+    Math.abs(a[2] - b[2]) <= tolerance &&
+    Math.abs(a[3] - b[3]) <= tolerance
+  )
+}
+
 function horizontalTableCellIndexFromTargets(table: HorizontalTableGroup, targets: FabricObject[]) {
   const objects = table.getObjects()
   const target = targets.find((item) => objects.includes(item))
@@ -3577,6 +3993,13 @@ function textFromHtml(html: string) {
 
 function pageSizeFor(size: PageSizeKey = defaultPageSizeKey) {
   return pageSizes[size] ?? defaultPageSize
+}
+
+function pageSizeTranslationKey(size: PageSizeKey = defaultPageSizeKey): TranslationKey {
+  if (size === 'a5') return 'pageSizeA5'
+  if (size === 'a4Landscape') return 'pageSizeA4Landscape'
+  if (size === 'a5Landscape') return 'pageSizeA5Landscape'
+  return 'pageSizeA4'
 }
 
 function pageStyle(page: PageData) {
