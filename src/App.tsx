@@ -247,6 +247,7 @@ const translations = {
     textGap: 'Text gap',
     textSize: 'Text size',
     textTools: 'Text tools',
+    transparency: 'Transparency',
     underline: 'Underline',
     undo: 'Undo',
     unavailableConversion: 'This conversion is not available in the browser.',
@@ -357,6 +358,7 @@ const translations = {
     textGap: 'Textabstand',
     textSize: 'Textgrosse',
     textTools: 'Textwerkzeuge',
+    transparency: 'Transparenz',
     underline: 'Unterstrichen',
     undo: 'Ruckgangig',
     unavailableConversion: 'Diese Konvertierung ist im Browser nicht verfugbar.',
@@ -468,6 +470,7 @@ const translations = {
     textGap: 'تباعد النص',
     textSize: 'حجم النص',
     textTools: 'ادوات النص',
+    transparency: 'الشفافية',
     underline: 'تحته خط',
     undo: 'تراجع',
     unavailableConversion: 'هذا التحويل غير متاح في المتصفح.',
@@ -947,12 +950,15 @@ function EditorMode({
   const [textFontFamily, setTextFontFamily] = useState(fontFamilies[0])
   const [textFontSize, setTextFontSize] = useState(defaultFontSize)
   const [textLineGap, setTextLineGap] = useState(1.72)
+  const [textTransparency, setTextTransparency] = useState(0)
   const [exportFileName, setExportFileName] = useState('akxreditor-document')
   const [textBold, setTextBold] = useState(false)
   const [textItalic, setTextItalic] = useState(false)
   const [textUnderline, setTextUnderline] = useState(false)
   const [stroke, setStroke] = useState('#6d5dfc')
   const [fill, setFill] = useState('#d93f75')
+  const [strokeTransparency, setStrokeTransparency] = useState(0)
+  const [fillTransparency, setFillTransparency] = useState(0)
   const [brushSize, setBrushSize] = useState(8)
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
   const [selectedTarget, setSelectedTarget] = useState<SelectedTarget | null>(null)
@@ -972,6 +978,9 @@ function EditorMode({
   }
   const canSelectPaint = tool === 'select-paint'
   const canSelectText = tool === 'select-text'
+  const effectiveTextColor = colorWithTransparency(textColor, textTransparency)
+  const effectiveStroke = colorWithTransparency(stroke, strokeTransparency)
+  const effectiveFill = colorWithTransparency(fill, fillTransparency)
 
   const moveLayer = (layer: LayerKind, direction: 'front' | 'back') => {
     setLayerOrder((currentOrder) => {
@@ -993,7 +1002,7 @@ function EditorMode({
 
   const createPaintText = (text: string, left: number, top: number) =>
     new IText(text, {
-      fill: textColor,
+      fill: effectiveTextColor,
       fontFamily: textFontFamily,
       fontSize: Number.parseFloat(textFontSize),
       fontStyle: textItalic ? 'italic' : 'normal',
@@ -1008,7 +1017,7 @@ function EditorMode({
 
   const textStyleVars = {
     '--editor-line-height': textLineGap,
-    '--editor-text-color': textColor,
+    '--editor-text-color': effectiveTextColor,
   } as React.CSSProperties
 
   const activatePage = (pageId: string) => {
@@ -1169,8 +1178,17 @@ function EditorMode({
 
   const updateTextColor = (nextColor: string) => {
     setTextColor(nextColor)
-    updateSelectedPaintTextStyle({ fill: nextColor })
-    if (!selectedPaintText() && editor) runTextCommand(() => editor.chain().focus().selectAll().setColor(nextColor).run())
+    const nextEffectiveColor = colorWithTransparency(nextColor, textTransparency)
+    updateSelectedPaintTextStyle({ fill: nextEffectiveColor })
+    if (!selectedPaintText() && editor) runTextCommand(() => editor.chain().focus().selectAll().setColor(nextEffectiveColor).run())
+  }
+
+  const updateTextTransparency = (nextTransparency: number) => {
+    const normalizedTransparency = clamp(Math.round(nextTransparency), 0, 100)
+    setTextTransparency(normalizedTransparency)
+    const nextEffectiveColor = colorWithTransparency(textColor, normalizedTransparency)
+    updateSelectedPaintTextStyle({ fill: nextEffectiveColor })
+    if (!selectedPaintText() && editor) runTextCommand(() => editor.chain().focus().selectAll().setColor(nextEffectiveColor).run())
   }
 
   const updateTextFontFamily = (nextFamily: string) => {
@@ -1237,7 +1255,7 @@ function EditorMode({
     const table = createHorizontalTableGroup({
       cellWidth: Math.max(84, Math.min(150, (pageSize.width - position.left - 34) / 3)),
       cellCount: 3,
-      fill: textColor,
+      fill: effectiveTextColor,
       fontFamily: textFontFamily,
       fontSize: Number.parseFloat(textFontSize),
       fontStyle: textItalic ? 'italic' : 'normal',
@@ -1680,6 +1698,11 @@ function EditorMode({
               <Baseline size={16} />
               <input type="color" onChange={(event) => updateTextColor(event.target.value)} value={textColor} />
             </label>
+            <label className="range-control transparency-control" title={t('transparency')}>
+              <span>{t('transparency')}</span>
+              <input min="0" max="100" onChange={(event) => updateTextTransparency(Number(event.target.value))} type="range" value={textTransparency} />
+              <output>{textTransparency}%</output>
+            </label>
             <label className="range-control" title={t('textGap')}>
               <Rows3 size={16} />
               <input min="1" max="2.6" onChange={(event) => updateTextLineGap(Number(event.target.value))} step="0.02" type="range" value={textLineGap} />
@@ -1862,15 +1885,15 @@ function EditorMode({
               pageHeight={pageSize.height}
               pageWidth={pageSize.width}
               fillPageImageWithBucket={fillPageImageWithBucket}
-              textColor={textColor}
+              textColor={effectiveTextColor}
               textBold={textBold}
               textFontFamily={textFontFamily}
               textFontSize={Number.parseFloat(textFontSize)}
               textItalic={textItalic}
               textLineGap={textLineGap}
               textUnderline={textUnderline}
-              fill={fill}
-              stroke={stroke}
+              fill={effectiveFill}
+              stroke={effectiveStroke}
               zIndex={relativeLayerZ.paint}
               tool={tool}
             />
@@ -1948,32 +1971,42 @@ function EditorMode({
               <Highlighter size={16} />
               <input onChange={(event) => setStroke(event.target.value)} type="color" value={stroke} />
             </label>
+            <label className="range-control transparency-control" title={`${t('strokeColor')} ${t('transparency')}`}>
+              <span>{t('transparency')}</span>
+              <input min="0" max="100" onChange={(event) => setStrokeTransparency(clamp(Math.round(Number(event.target.value)), 0, 100))} type="range" value={strokeTransparency} />
+              <output>{strokeTransparency}%</output>
+            </label>
             <label className="color-chip" title={t('fillColor')}>
               <Shapes size={16} />
               <input onChange={(event) => setFill(event.target.value)} type="color" value={fill} />
             </label>
+            <label className="range-control transparency-control" title={`${t('fillColor')} ${t('transparency')}`}>
+              <span>{t('transparency')}</span>
+              <input min="0" max="100" onChange={(event) => setFillTransparency(clamp(Math.round(Number(event.target.value)), 0, 100))} type="range" value={fillTransparency} />
+              <output>{fillTransparency}%</output>
+            </label>
           </div>
           <div className="rail-section compact-icons">
-            <IconButton icon={RectangleHorizontal} label={t('rectangle')} onClick={() => addFabricObject(new Rect({ left: 160, top: 160, width: 190, height: 110, fill, stroke, strokeWidth: 3, rx: 8, ry: 8 }))} />
-            <IconButton icon={CircleIcon} label={t('circle')} onClick={() => addFabricObject(new Circle({ left: 220, top: 150, radius: 64, fill, stroke, strokeWidth: 3 }))} />
+            <IconButton icon={RectangleHorizontal} label={t('rectangle')} onClick={() => addFabricObject(new Rect({ left: 160, top: 160, width: 190, height: 110, fill: effectiveFill, stroke: effectiveStroke, strokeWidth: 3, rx: 8, ry: 8 }))} />
+            <IconButton icon={CircleIcon} label={t('circle')} onClick={() => addFabricObject(new Circle({ left: 220, top: 150, radius: 64, fill: effectiveFill, stroke: effectiveStroke, strokeWidth: 3 }))} />
             <IconButton
               icon={X}
               label={t('xShape')}
               onClick={() => {
                 const size = 140
                 const width = Math.max(3, brushSize)
-                const firstStroke = new Line([0, 0, size, size], { stroke, strokeWidth: width, strokeLineCap: 'round' })
-                const secondStroke = new Line([size, 0, 0, size], { stroke, strokeWidth: width, strokeLineCap: 'round' })
+                const firstStroke = new Line([0, 0, size, size], { stroke: effectiveStroke, strokeWidth: width, strokeLineCap: 'round' })
+                const secondStroke = new Line([size, 0, 0, size], { stroke: effectiveStroke, strokeWidth: width, strokeLineCap: 'round' })
                 addFabricObject(new Group([firstStroke, secondStroke], { left: 220, top: 160 }))
               }}
             />
-            <IconButton icon={Rows3} label={t('line')} onClick={() => addFabricObject(new Line([150, 230, 470, 300], { stroke, strokeWidth: brushSize, strokeLineCap: 'round' }))} />
+            <IconButton icon={Rows3} label={t('line')} onClick={() => addFabricObject(new Line([150, 230, 470, 300], { stroke: effectiveStroke, strokeWidth: brushSize, strokeLineCap: 'round' }))} />
             <IconButton
               icon={ArrowRight}
               label={t('arrow')}
               onClick={() => {
-                const line = new Line([0, 0, 240, 80], { stroke, strokeWidth: brushSize, strokeLineCap: 'round' })
-                const head = new Triangle({ left: 240, top: 80, width: 24, height: 28, fill: stroke, angle: 110, originX: 'center', originY: 'center' })
+                const line = new Line([0, 0, 240, 80], { stroke: effectiveStroke, strokeWidth: brushSize, strokeLineCap: 'round' })
+                const head = new Triangle({ left: 240, top: 80, width: 24, height: 28, fill: effectiveStroke, angle: 110, originX: 'center', originY: 'center' })
                 addFabricObject(new Group([line, head], { left: 170, top: 220 }))
               }}
             />
@@ -3838,7 +3871,7 @@ async function floodFillImageDataUrl(dataUrl: string, pageX: number, pageY: numb
 
   const x = clamp(Math.floor((pageX / pageWidth) * canvas.width), 0, canvas.width - 1)
   const y = clamp(Math.floor((pageY / pageHeight) * canvas.height), 0, canvas.height - 1)
-  const fillColor = hexColorToRgba(fill)
+  const fillColor = colorToRgba(fill)
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
   const data = imageData.data
   const startIndex = (y * canvas.width + x) * 4
@@ -3899,7 +3932,23 @@ async function floodFillImageDataUrl(dataUrl: string, pageX: number, pageY: numb
   return canvas.toDataURL('image/png')
 }
 
-function hexColorToRgba(color: string) {
+function colorWithTransparency(color: string, transparency: number) {
+  const [red, green, blue] = colorToRgba(color)
+  const alpha = 1 - clamp(transparency, 0, 100) / 100
+  return `rgba(${red}, ${green}, ${blue}, ${alpha.toFixed(2)})`
+}
+
+function colorToRgba(color: string) {
+  const rgba = color.trim().match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(\d*(?:\.\d+)?))?\s*\)$/i)
+  if (rgba) {
+    return [
+      clamp(Number.parseInt(rgba[1], 10), 0, 255),
+      clamp(Number.parseInt(rgba[2], 10), 0, 255),
+      clamp(Number.parseInt(rgba[3], 10), 0, 255),
+      clamp(Math.round((rgba[4] == null ? 1 : Number.parseFloat(rgba[4])) * 255), 0, 255),
+    ]
+  }
+
   const hex = color.trim().replace(/^#/, '')
   if (/^[0-9a-f]{6}$/i.test(hex)) {
     return [
@@ -3907,6 +3956,14 @@ function hexColorToRgba(color: string) {
       Number.parseInt(hex.slice(2, 4), 16),
       Number.parseInt(hex.slice(4, 6), 16),
       255,
+    ]
+  }
+  if (/^[0-9a-f]{8}$/i.test(hex)) {
+    return [
+      Number.parseInt(hex.slice(0, 2), 16),
+      Number.parseInt(hex.slice(2, 4), 16),
+      Number.parseInt(hex.slice(4, 6), 16),
+      Number.parseInt(hex.slice(6, 8), 16),
     ]
   }
   return [0, 0, 0, 255]

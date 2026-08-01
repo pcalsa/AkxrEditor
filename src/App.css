@@ -151,7 +151,7 @@ textarea {
   min-height: 0;
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: minmax(176px, 218px) minmax(0, 1fr) minmax(172px, 214px);
+  grid-template-columns: minmax(214px, 260px) minmax(0, 1fr) minmax(210px, 256px);
   gap: 14px;
   padding: 14px;
 }
@@ -216,6 +216,45 @@ textarea {
 .rail-section .range-control input {
   width: 100%;
   min-width: 0;
+}
+
+.transparency-control {
+  width: 100%;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-height: 58px;
+  padding: 7px 10px;
+  align-items: center;
+}
+
+.transparency-control span,
+.transparency-control output {
+  color: #cfc6df;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.transparency-control span {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transparency-control input {
+  order: 3;
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.transparency-control output {
+  order: 2;
+  min-width: 38px;
+  text-align: right;
+  color: #f8f5ff;
 }
 
 .rail-section .export-menu-with-name {
