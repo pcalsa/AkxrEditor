@@ -35,6 +35,7 @@ import {
   RectangleHorizontal,
   Redo2,
   RotateCw,
+  Save,
   Rows3,
   ScissorsLineDashed,
   Shapes,
@@ -67,7 +68,7 @@ import mammoth from 'mammoth'
 import JSZip from 'jszip'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url'
-import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx'
+import { Document as DocxDocument, ImageRun, Packer, Paragraph, TextRun } from 'docx'
 import { jsPDF } from 'jspdf'
 import './App.css'
 
@@ -110,6 +111,7 @@ type FloatingImage = {
   rotation: number
 }
 type PageData = {
+  canvasJson?: string
   id: string
   html: string
   images: FloatingImage[]
@@ -117,6 +119,12 @@ type PageData = {
   fontFamily?: string
   pageImage?: string
   size?: PageSizeKey
+}
+type SavedProject = {
+  activePageId?: string
+  language?: AppLanguage
+  pages: PageData[]
+  version: 1
 }
 type MovableTextMode = 'plain' | 'bullet' | 'numbered' | 'table'
 type ManagedIText = IText & {
@@ -169,11 +177,14 @@ const translations = {
     clearDrawing: 'Clear drawing',
     commonFontSizes: 'Common font sizes',
     convert: 'Convert',
+    convertFiles: 'Convert {count} files',
     continue: 'Continue',
     convertAFIle: 'Convert a File',
     convertDropZone: 'Drop into the ribbon, export from the browser',
     convertFinePrint: 'PDF to DOCX uses text extraction only; browser conversion cannot preserve full PDF layout.',
     convertPrompt: 'Upload a DOCX, PDF, TXT, MD, PNG, or JPG file to convert it locally.',
+    conversionComplete: '{completed} of {total} files converted to {format}.',
+    conversionFailed: '{count} file(s) could not be converted.',
     converted: 'Converted {file} to {format}.',
     converting: 'Converting in your browser...',
     couldNotAddImagePage: 'Could not add that image page.',
@@ -194,9 +205,12 @@ const translations = {
     editorModes: 'Editor modes',
     eraser: 'Eraser',
     export: 'Export',
+    exporting: 'Preparing export…',
+    exportReady: 'Export ready',
     exportFileName: 'Export file name',
     exportFormat: 'Export format',
     fileName: 'File name',
+    filesQueued: '{count} files queued',
     imageExportMultiplePagesMessage:
       'This document has {count} pages. Each page will be downloaded separately as a {format} file.',
     imageExportMultiplePagesTitle: 'Multiple pages',
@@ -217,6 +231,8 @@ const translations = {
     language: 'Language',
     line: 'Line',
     move: 'Move',
+    newProject: 'New project',
+    newProjectWarning: 'Start a new project? Your current autosaved draft will be cleared.',
     numberedList: 'Numbered list',
     openFile: 'Open file',
     page: 'Page {number}',
@@ -231,15 +247,18 @@ const translations = {
     placeText: 'Place text',
     rectangle: 'Rectangle',
     redo: 'Redo',
+    removeFile: 'Remove file',
     resizeHeight: 'Resize height',
     resizeProportionally: 'Resize proportionally',
     resizeWidth: 'Resize width',
     rotate: 'Rotate',
+    saveProject: 'Save project',
     selectedToBack: 'Selected to back',
     selectedToFront: 'Selected to front',
     selectPaint: 'Select paint',
     selectText: 'Select text',
     setFontSize: 'Set font size to {size}px',
+    projectSaved: 'Project saved locally',
     strokeColor: 'Stroke color',
     targetFormat: 'Target format',
     textColor: 'Text color',
@@ -483,8 +502,27 @@ type TranslationKey = keyof typeof translations.en
 type Translate = (key: TranslationKey, values?: Record<string, string | number>) => string
 
 function translate(language: AppLanguage, key: TranslationKey, values: Record<string, string | number> = {}) {
-  const text = translations[language][key] ?? translations.en[key]
+  const catalog = translations[language] as Record<string, string>
+  const text = repairLegacyArabicEncoding(catalog[key] ?? translations.en[key])
   return Object.entries(values).reduce((currentText, [name, value]) => currentText.replaceAll(`{${name}}`, String(value)), text)
+}
+
+function repairLegacyArabicEncoding(value: string) {
+  // The original Arabic catalog was saved as Windows-1252-decoded UTF-8. Keep
+  // the source compatible while presenting proper Arabic in every browser.
+  if (!/[ØÙ]/.test(value)) return value
+  const windows1252Bytes: Record<string, number> = {
+    '€': 0x80, '‚': 0x82, 'ƒ': 0x83, '„': 0x84, '…': 0x85, '†': 0x86, '‡': 0x87,
+    'ˆ': 0x88, '‰': 0x89, 'Š': 0x8a, '‹': 0x8b, 'Œ': 0x8c, 'Ž': 0x8e, '‘': 0x91,
+    '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97, '˜': 0x98,
+    '™': 0x99, 'š': 0x9a, '›': 0x9b, 'œ': 0x9c, 'ž': 0x9e, 'Ÿ': 0x9f,
+  }
+  try {
+    const bytes = Uint8Array.from([...value].map((character) => windows1252Bytes[character] ?? character.charCodeAt(0)))
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return value
+  }
 }
 
 function localizedErrorMessage(error: unknown, t: Translate, fallbackKey: TranslationKey) {
@@ -543,12 +581,14 @@ const StackOrder = Mark.create({
 })
 
 const starterContent = '<p></p>'
+const autosaveKey = 'akxr-editor-autosave-v1'
 
 function App() {
-  const [language, setLanguage] = useState<AppLanguage>('en')
+  const [restoredDraft] = useState(() => readAutosavedProject())
+  const [language, setLanguage] = useState<AppLanguage>(restoredDraft?.language ?? 'en')
   const [mode, setMode] = useState<Mode>('editor')
-  const [pages, setPages] = useState<PageData[]>([{ id: createId(), html: starterContent, images: [], size: defaultPageSizeKey }])
-  const [activePageId, setActivePageId] = useState(() => pages[0].id)
+  const [pages, setPages] = useState<PageData[]>(() => restoredDraft?.pages ?? [{ id: createId(), html: starterContent, images: [], size: defaultPageSizeKey }])
+  const [activePageId, setActivePageId] = useState(() => restoredDraft?.activePageId ?? restoredDraft?.pages[0]?.id ?? pages[0].id)
   const activePageIdRef = useRef(activePageId)
   const loadingPage = useRef(false)
   const pagesRef = useRef<HTMLDivElement>(null)
@@ -595,6 +635,17 @@ function App() {
   }, [pages])
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      try {
+        localStorage.setItem(autosaveKey, JSON.stringify({ activePageId, language, pages, version: 1 satisfies SavedProject['version'] }))
+      } catch {
+        // Storage can be unavailable or full (for example after many large images).
+      }
+    }, 700)
+    return () => window.clearTimeout(timeout)
+  }, [activePageId, language, pages])
+
+  useEffect(() => {
     const confirmBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!hasUnsavedChanges.current) return
       event.preventDefault()
@@ -609,6 +660,28 @@ function App() {
   const markUnsaved = useCallback(() => {
     hasUnsavedChanges.current = true
   }, [])
+
+  const startNewProject = useCallback(() => {
+    if (!window.confirm(t('newProjectWarning'))) return
+    const nextPage = { id: createId(), html: starterContent, images: [], size: defaultPageSizeKey }
+    localStorage.removeItem(autosaveKey)
+    pageHistory.current = []
+    pageFuture.current = []
+    hasUnsavedChanges.current = false
+    loadingPage.current = true
+    setPages([nextPage])
+    setActivePageId(nextPage.id)
+    editor?.commands.setContent(nextPage.html)
+    window.setTimeout(() => {
+      loadingPage.current = false
+      scrollToPage(nextPage.id)
+    }, 0)
+  }, [editor, t])
+
+  const updatePageCanvas = useCallback((pageId: string, canvasJson: string) => {
+    markUnsaved()
+    setPages((currentPages) => currentPages.map((page) => (page.id === pageId ? { ...page, canvasJson } : page)))
+  }, [markUnsaved])
 
   const restorePages = useCallback(
     (nextPages: PageData[]) => {
@@ -789,10 +862,12 @@ function App() {
 
   const openDocument = async (file: File) => {
     markUnsaved()
-    const nextPages = await pagesFromFile(file)
-    const firstPageId = nextPages[0].id
+    const project = extensionOf(file.name) === 'akxr' ? await readProjectFile(file) : null
+    const nextPages = project?.pages ?? await pagesFromFile(file)
+    const firstPageId = project?.activePageId ?? nextPages[0].id
     loadingPage.current = true
     setPages(nextPages)
+    if (project) setLanguage(project.language ?? 'en')
     setActivePageId(firstPageId)
     editor?.commands.setContent(nextPages[0].html)
     window.setTimeout(() => {
@@ -803,12 +878,17 @@ function App() {
   }
 
   return (
-    <main className="app-shell" lang={language}>
+    <main className="app-shell" dir={language === 'ar' ? 'rtl' : undefined} lang={language}>
       <Sidebar mode={mode} setMode={setMode} t={t} />
       <section className="workspace">
         <header className="topbar">
-          <h1>AKXREDITOR</h1>
-          {mode !== 'editor' && (
+          <div className="topbar-title">
+            <span>Creative workspace</span>
+            <h1>{mode === 'editor' ? t('editor') : t('convertAFIle')}</h1>
+          </div>
+          <div className="topbar-actions">
+            {mode === 'editor' && <span className="save-indicator"><span />Autosaves locally</span>}
+            {mode !== 'editor' && (
             <label className="language-picker">
               <span>{t('language')}</span>
               <select aria-label={t('language')} onChange={(event) => setLanguage(event.target.value as AppLanguage)} value={language}>
@@ -819,7 +899,8 @@ function App() {
                 ))}
               </select>
             </label>
-          )}
+            )}
+          </div>
         </header>
 
         {mode === 'editor' && (
@@ -829,10 +910,12 @@ function App() {
             addImagePage={addImagePage}
             addPage={addPage}
             addPdfPages={addPdfPages}
+            updatePageCanvas={updatePageCanvas}
             deletePage={deletePage}
             editor={editor}
             pages={pages}
             pagesRef={pagesRef}
+            onNewProject={startNewProject}
             openDocument={openDocument}
             recordPagesHistory={recordPagesHistory}
             markUnsaved={markUnsaved}
@@ -863,7 +946,14 @@ function Sidebar({ mode, setMode, t }: { mode: Mode; setMode: (mode: Mode) => vo
 
   return (
     <aside className="sidebar">
-      <div className="brand-mark">AX</div>
+      <div className="brand-lockup">
+        <div className="brand-mark"><img alt="AKXR Editor" src="/akxr-logo.png" /></div>
+        <div className="brand-copy">
+          <strong>AKXR</strong>
+          <span>Editor</span>
+        </div>
+      </div>
+      <p className="sidebar-caption">Write, sketch, and arrange in one calm workspace.</p>
       <nav className="mode-tabs" aria-label={t('editorModes')}>
         {items.map((item) => {
           const Icon = item.icon
@@ -890,10 +980,12 @@ function EditorMode({
   addImagePage,
   addPage,
   addPdfPages,
+  updatePageCanvas,
   deletePage,
   editor,
   pages,
   pagesRef,
+  onNewProject,
   openDocument,
   recordPagesHistory,
   markUnsaved,
@@ -914,10 +1006,12 @@ function EditorMode({
   addImagePage: (file: File) => Promise<void>
   addPage: (size?: PageSizeKey) => void
   addPdfPages: (file: File) => Promise<void>
+  updatePageCanvas: (pageId: string, canvasJson: string) => void
   deletePage: (pageId: string) => void
   editor: Editor | null
   pages: PageData[]
   pagesRef: React.RefObject<HTMLDivElement | null>
+  onNewProject: () => void
   openDocument: (file: File) => Promise<PageData[]>
   recordPagesHistory: () => void
   markUnsaved: () => void
@@ -967,6 +1061,8 @@ function EditorMode({
   const [hasFabricClipboard, setHasFabricClipboard] = useState(false)
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null)
   const [dragOverPageId, setDragOverPageId] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState('')
+  const shortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined)
   const layerZ = {
     text: layerOrder.indexOf('text') + 1,
     images: layerOrder.indexOf('images') + 1,
@@ -1056,13 +1152,27 @@ function EditorMode({
     setSelectedTarget(tableCellIndex == null ? { kind: 'paint', pageId } : { kind: 'table-cell', pageId, cellIndex: tableCellIndex })
   }, [])
 
-  const registerCanvas = useCallback((pageId: string, canvas: FabricCanvas | null) => {
+  const registerCanvas = useCallback((pageId: string, canvas: FabricCanvas | null, initialCanvasJson?: string) => {
     if (canvas) {
       canvasMap.current.set(pageId, canvas)
-      if (!histories.current.has(pageId)) {
+      const history = histories.current.get(pageId)
+      const snapshot = history?.at(-1) ?? initialCanvasJson
+      if (!snapshot) {
         histories.current.set(pageId, [canvasSnapshot(canvas)])
         futures.current.set(pageId, [])
+        return
       }
+
+      // A canvas is recreated when a page is removed and then restored through
+      // undo/redo. Rehydrate it from its latest snapshot so drawings are never
+      // silently lost with the page component.
+      loadingCanvas.current = true
+      void canvas.loadFromJSON(JSON.parse(snapshot)).then(() => {
+        restoreManagedCanvasObjects(canvas)
+        canvas.requestRenderAll()
+      }).finally(() => {
+        loadingCanvas.current = false
+      })
     } else {
       canvasMap.current.delete(pageId)
     }
@@ -1071,12 +1181,14 @@ function EditorMode({
   const recordCanvasHistory = useCallback((pageId: string, canvas: FabricCanvas) => {
     if (loadingCanvas.current) return
     const history = histories.current.get(pageId) ?? []
-    history.push(canvasSnapshot(canvas))
+    const snapshot = canvasSnapshot(canvas)
+    history.push(snapshot)
     histories.current.set(pageId, history.slice(-50))
     futures.current.set(pageId, [])
     actionHistory.current.push('paint')
     redoHistory.current = []
-  }, [])
+    updatePageCanvas(pageId, snapshot)
+  }, [updatePageCanvas])
 
   const loadCanvasSnapshot = (pageId: string, snapshot: string) => {
     const canvas = canvasMap.current.get(pageId)
@@ -1089,7 +1201,7 @@ function EditorMode({
     })
   }
 
-  const activeCanvas = () => canvasMap.current.get(activePageId)
+  const activeCanvas = useCallback(() => canvasMap.current.get(activePageId), [activePageId])
 
   const selectedPaintText = () => {
     const object = activeCanvas()?.getActiveObject()
@@ -1106,6 +1218,7 @@ function EditorMode({
   const addFabricObject = (object: FabricObject) => {
     const canvas = activeCanvas()
     if (!canvas) return
+    applyCanvasSelectionStyle(object)
     setTool('select-paint')
     moveLayerToFront('paint')
     setSelectedImageId(null)
@@ -1435,13 +1548,36 @@ function EditorMode({
     })
   }
 
+  const saveProject = () => {
+    const snapshotPages = pages.map((page) => ({
+      ...page,
+      canvasJson: canvasMap.current.get(page.id) ? canvasSnapshot(canvasMap.current.get(page.id)!) : page.canvasJson,
+    }))
+    const project: SavedProject = { activePageId, language, pages: snapshotPages, version: 1 }
+    saveBlob(new Blob([JSON.stringify(project)], { type: 'application/json;charset=utf-8' }), `${safeFileBaseName(exportFileName)}.akxr`)
+    setStatusMessage(t('projectSaved'))
+    window.setTimeout(() => setStatusMessage(''), 3_200)
+  }
+
   const continueImageExport = () => {
     if (!pendingImageExport) return
     const { baseName, format } = pendingImageExport
     setPendingImageExport(null)
     void savePagesAsImageFiles(format, baseName).catch((error) => {
       window.alert(localizedErrorMessage(error, t, 'couldNotExport'))
+    }).finally(() => {
+      setStatusMessage(t('exportReady'))
+      window.setTimeout(() => setStatusMessage(''), 3_200)
     })
+  }
+
+  const exportWithStatus = async (format: ExportFormat, fileName: string) => {
+    setStatusMessage(t('exporting'))
+    await exportDocument(format, fileName)
+    if ((format !== 'png' && format !== 'jpg') || pages.length <= 1) {
+      setStatusMessage(t('exportReady'))
+      window.setTimeout(() => setStatusMessage(''), 3_200)
+    }
   }
 
   const exportDocument = async (format: ExportFormat, requestedBaseName = exportFileName) => {
@@ -1468,7 +1604,10 @@ function EditorMode({
       return
     }
     if (format === 'docx') {
-      saveBlob(await createDocxBlob(text, pages[0]?.size), exportFileNameFor(baseName, format))
+      saveBlob(
+        await createDocxBlobFromPages(pages, (pageId) => canvasMap.current.get(pageId)?.toDataURL({ format: 'png', multiplier: 1 })),
+        exportFileNameFor(baseName, format),
+      )
       return
     }
     if (format === 'pdf') {
@@ -1559,8 +1698,7 @@ function EditorMode({
     actionHistory.current.push(kind)
   }
 
-  useEffect(() => {
-    const handleShortcut = (event: KeyboardEvent) => {
+  shortcutHandlerRef.current = (event: KeyboardEvent) => {
       const target = event.target
       const typingTarget = isTypingTarget(target)
       const isUndo = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey
@@ -1600,11 +1738,13 @@ function EditorMode({
         clearCanvasSelection()
         if (tool === 'place-text' || tool === 'brush' || tool === 'eraser' || tool === 'bucket') setTool('select-paint')
       }
-    }
+  }
 
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => shortcutHandlerRef.current(event)
     window.addEventListener('keydown', handleShortcut)
     return () => window.removeEventListener('keydown', handleShortcut)
-  }, [activePageId, copySelectedCanvasObject, deleteSelectedObject, hasFabricClipboard, pasteCanvasObject, redoLast, selectedImageId, selectedTarget, tool, undoLast])
+  }, [])
 
   const textFontSizeNumber = Number.parseFloat(textFontSize)
   const defaultFontSizeNumber = Number.parseFloat(defaultFontSize)
@@ -1615,8 +1755,10 @@ function EditorMode({
     <section className="mode-panel" style={textStyleVars}>
       <div className="editor-command-strip">
         <ToolButton icon={Upload} label={t('openFile')} onClick={() => openInputRef.current?.click()} />
+        <ToolButton icon={Plus} label={t('newProject')} onClick={onNewProject} />
+        <ToolButton icon={Save} label={t('saveProject')} onClick={saveProject} />
         <input
-          accept=".docx,.pdf,.txt,.md,.markdown,.html,.htm,.png,.jpg,.jpeg"
+          accept=".akxr,.docx,.pdf,.txt,.md,.markdown,.html,.htm,.png,.jpg,.jpeg"
           className="hidden-input"
           onChange={(event) => {
             const file = event.target.files?.[0]
@@ -1660,6 +1802,7 @@ function EditorMode({
           </select>
         </label>
         <span className="command-spacer" />
+        {statusMessage && <span className="editor-status" role="status">{statusMessage}</span>}
         <IconButton icon={Undo2} label={t('undo')} onClick={undoLast} />
         <IconButton icon={Redo2} label={t('redo')} onClick={redoLast} />
       </div>
@@ -1866,6 +2009,7 @@ function EditorMode({
               active={page.id === activePageId}
               brushSize={brushSize}
               canSelectPaint={canSelectPaint}
+              canvasJson={page.canvasJson}
               pageId={page.id}
               recordCanvasHistory={recordCanvasHistory}
               registerCanvas={registerCanvas}
@@ -2019,7 +2163,7 @@ function EditorMode({
           </div>
           <span className="rail-spacer" />
           <div className="rail-section export-rail-section">
-            <ExportMenu fileName={exportFileName} formats={exportFormats} onExport={exportDocument} onFileNameChange={setExportFileName} t={t} />
+            <ExportMenu fileName={exportFileName} formats={exportFormats} onExport={exportWithStatus} onFileNameChange={setExportFileName} t={t} />
           </div>
         </aside>
       </div>
@@ -2027,7 +2171,10 @@ function EditorMode({
         <ImageExportConfirmation
           format={pendingImageExport.format}
           pageCount={pendingImageExport.pageCount}
-          onCancel={() => setPendingImageExport(null)}
+          onCancel={() => {
+            setPendingImageExport(null)
+            setStatusMessage('')
+          }}
           onContinue={continueImageExport}
           t={t}
         />
@@ -2056,6 +2203,7 @@ function PageCanvas({
   active,
   brushSize,
   canSelectPaint,
+  canvasJson,
   pageHeight,
   pageId,
   pageWidth,
@@ -2080,13 +2228,14 @@ function PageCanvas({
   active: boolean
   brushSize: number
   canSelectPaint: boolean
+  canvasJson?: string
   pageHeight: number
   pageId: string
   pageWidth: number
   fillPageImageWithBucket: (pageId: string, x: number, y: number, fillColor: string) => Promise<boolean>
   onPageImageBucketFill: () => void
   recordCanvasHistory: (pageId: string, canvas: FabricCanvas) => void
-  registerCanvas: (pageId: string, canvas: FabricCanvas | null) => void
+  registerCanvas: (pageId: string, canvas: FabricCanvas | null, initialCanvasJson?: string) => void
   onSelectDrawing: (pageId: string, tableCellIndex?: number) => void
   onOpenDrawingContextMenu: (event: MouseEvent, tableCellIndex: number | undefined, pastePoint: CanvasPoint, hasTarget: boolean) => void
   textColor: string
@@ -2103,6 +2252,7 @@ function PageCanvas({
 }) {
   const canvasEl = useRef<HTMLCanvasElement>(null)
   const fabricRef = useRef<FabricCanvas | null>(null)
+  const initialCanvasJson = useRef(canvasJson)
   const activeRef = useRef(active)
   const toolRef = useRef(tool)
   const textColorRef = useRef(textColor)
@@ -2160,17 +2310,27 @@ function PageCanvas({
       fireRightClick: true,
       preserveObjectStacking: true,
       selection: true,
+      selectionBorderColor: '#7c5cff',
+      selectionColor: 'rgba(124, 92, 255, 0.08)',
+      selectionDashArray: [5, 4],
+      selectionLineWidth: 1.5,
       stopContextMenu: true,
       width: pageWidth,
     })
     fabricRef.current = canvas
     const record = () => callbacksRef.current.recordCanvasHistory(pageId, canvas)
+    const styleAndRecord = (event: { target?: FabricObject }) => {
+      if (event.target) applyCanvasSelectionStyle(event.target)
+      record()
+    }
     const constrain = (event: { target?: FabricObject }) => {
       if (event.target) keepObjectInsideCanvas(event.target, canvas)
     }
-    canvas.on('object:added', record)
+    canvas.on('object:added', styleAndRecord)
     canvas.on('object:modified', record)
     canvas.on('object:removed', record)
+    canvas.on('text:changed', record)
+    canvas.on('text:editing:exited', record)
     canvas.on('object:moving', constrain)
     canvas.on('object:scaling', constrain)
     canvas.on('object:rotating', constrain)
@@ -2241,11 +2401,19 @@ function PageCanvas({
         return
       }
       if (event.target) {
+        if (event.target instanceof IText) {
+          canvas.setActiveObject(event.target)
+          event.target.enterEditing()
+          moveTextCursorToEnd(event.target)
+          canvas.requestRenderAll()
+        }
         callbacksRef.current.onSelectDrawing(pageId, tableCellIndexFromEvent(event) ?? undefined)
         return
       }
       const pointer = canvas.getScenePoint(event.e)
-      const text = new IText('Type here', {
+      const activeObject = canvas.getActiveObject()
+      if (activeObject instanceof IText && activeObject.isEditing) activeObject.exitEditing()
+      const text = new IText('', {
         fill: textColorRef.current,
         fontFamily: textFontFamilyRef.current,
         fontSize: textFontSizeRef.current,
@@ -2258,7 +2426,9 @@ function PageCanvas({
         top: Math.round(clamp(pointer.y, 0, pageHeight - 42)),
         underline: textUnderlineRef.current,
       })
-      configureManagedText(text, 'plain', canvas)
+      // Match OneNote's placement behavior: a click commits the previous
+      // textbox in place and opens a new empty textbox at the new point.
+      configureManagedText(text, 'plain', canvas, { removeIfEmpty: true })
       canvas.add(text)
       canvas.setActiveObject(text)
       text.enterEditing()
@@ -2270,7 +2440,7 @@ function PageCanvas({
     canvas.on('selection:updated', selectDrawing)
     canvas.on('contextmenu', openDrawingMenu)
     canvas.on('mouse:down', handleMouseDown)
-    registerCanvas(pageId, canvas)
+    registerCanvas(pageId, canvas, initialCanvasJson.current)
     return () => {
       registerCanvas(pageId, null)
       canvas.dispose()
@@ -2527,34 +2697,51 @@ function SelectionContextMenu({
 
 type ConvertMessage =
   | { kind: 'prompt' }
-  | { kind: 'converting' }
-  | { fileName: string; kind: 'converted'; limitation: boolean; target: ExportFormat }
+  | { completed: number; kind: 'converting'; total: number }
+  | { completed: number; failed: number; kind: 'converted'; limitation: boolean; target: ExportFormat; total: number }
   | { kind: 'error'; message?: string }
 
 function ConvertMode({ t }: { t: Translate }) {
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [target, setTarget] = useState<ExportFormat>('pdf')
   const [message, setMessage] = useState<ConvertMessage>({ kind: 'prompt' })
-  const fileType = useMemo(() => (file ? extensionOf(file.name) : ''), [file])
   const displayMessage = useMemo(() => {
-    if (message.kind === 'converting') return t('converting')
+    if (message.kind === 'converting') return `${t('converting')} ${message.completed}/${message.total}`
     if (message.kind === 'converted') {
       const limitation = message.limitation ? ` ${t('pdfDocxExtractedOnly')}` : ''
-      return `${t('converted', { file: message.fileName, format: message.target.toUpperCase() })}${limitation}`
+      const summary = t('conversionComplete', { completed: message.completed, format: message.target.toUpperCase(), total: message.total })
+      const failures = message.failed ? ` ${t('conversionFailed', { count: message.failed })}` : ''
+      return `${summary}${failures}${limitation}`
     }
     if (message.kind === 'error') return localizedErrorMessage(message.message, t, 'unavailableConversion')
     return t('convertPrompt')
   }, [message, t])
 
+  const addFiles = (nextFiles: FileList | File[]) => {
+    const supportedFiles = Array.from(nextFiles).filter((item) => ['docx', 'pdf', 'txt', 'md', 'markdown', 'png', 'jpg', 'jpeg'].includes(extensionOf(item.name)))
+    setFiles((currentFiles) => {
+      const knownFiles = new Set(currentFiles.map((item) => `${item.name}:${item.size}:${item.lastModified}`))
+      return [...currentFiles, ...supportedFiles.filter((item) => !knownFiles.has(`${item.name}:${item.size}:${item.lastModified}`))]
+    })
+    setMessage({ kind: 'prompt' })
+  }
+
   const convert = async () => {
-    if (!file) return
-    setMessage({ kind: 'converting' })
-    try {
-      await convertFile(file, target)
-      setMessage({ fileName: file.name, kind: 'converted', limitation: fileType === 'pdf' && target === 'docx', target })
-    } catch (error) {
-      setMessage({ kind: 'error', message: error instanceof Error ? error.message : undefined })
+    if (!files.length) return
+    let completed = 0
+    let failed = 0
+    let limitation = false
+    for (const file of files) {
+      setMessage({ completed, kind: 'converting', total: files.length })
+      try {
+        await convertFile(file, target)
+        completed += 1
+        limitation ||= extensionOf(file.name) === 'pdf' && target === 'docx'
+      } catch {
+        failed += 1
+      }
     }
+    setMessage({ completed, failed, kind: 'converted', limitation, target, total: files.length })
   }
 
   return (
@@ -2562,14 +2749,15 @@ function ConvertMode({ t }: { t: Translate }) {
       <Ribbon title={t('convertAFIle')}>
         <label className="upload-button">
           <Upload size={17} />
-          <span>{file ? file.name : t('chooseFile')}</span>
+          <span>{files.length ? t('filesQueued', { count: files.length }) : t('chooseFile')}</span>
           <input
             accept=".docx,.pdf,.txt,.md,.markdown,.png,.jpg,.jpeg"
             className="hidden-input"
             onChange={(event) => {
-              setFile(event.target.files?.[0] ?? null)
-              setMessage({ kind: 'prompt' })
+              if (event.target.files) addFiles(event.target.files)
+              event.currentTarget.value = ''
             }}
+            multiple
             type="file"
           />
         </label>
@@ -2580,16 +2768,37 @@ function ConvertMode({ t }: { t: Translate }) {
             </option>
           ))}
         </select>
-        <button className="primary-action" disabled={!file} onClick={() => void convert()} type="button">
+        <button className="primary-action" disabled={!files.length || message.kind === 'converting'} onClick={() => void convert()} type="button">
           <ScissorsLineDashed size={17} />
-          {t('convert')}
+          {files.length > 1 ? t('convertFiles', { count: files.length }) : t('convert')}
         </button>
       </Ribbon>
       <div className="converter-stage">
-        <div className="drop-zone">
+        <div
+          className="drop-zone"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault()
+            addFiles(event.dataTransfer.files)
+          }}
+        >
           <Upload size={42} />
-          <h2>{file ? file.name : t('convertDropZone')}</h2>
+          <h2>{files.length ? t('filesQueued', { count: files.length }) : t('convertDropZone')}</h2>
           <p>{displayMessage}</p>
+          {files.length > 0 && (
+            <ul className="conversion-file-list" aria-label={t('filesQueued', { count: files.length })}>
+              {files.map((file) => (
+                <li key={`${file.name}:${file.size}:${file.lastModified}`}>
+                  <FileText size={16} />
+                  <span title={file.name}>{file.name}</span>
+                  <small>{extensionOf(file.name).toUpperCase()}</small>
+                  <button aria-label={`${t('removeFile')}: ${file.name}`} onClick={() => setFiles((currentFiles) => currentFiles.filter((item) => item !== file))} type="button">
+                    <X size={15} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <p className="fine-print">{t('convertFinePrint')}</p>
         </div>
       </div>
@@ -2793,6 +3002,7 @@ async function convertFile(file: File, target: ExportFormat) {
 
 async function pagesFromFile(file: File) {
   const source = extensionOf(file.name)
+  if (source === 'akxr') return (await readProjectFile(file)).pages
   if (source === 'pdf') return pagesFromPdf(file)
   if (source === 'png' || source === 'jpg' || source === 'jpeg') {
     const src = await fileToDataUrl(file)
@@ -2822,6 +3032,53 @@ async function pagesFromFile(file: File) {
   const { text, html, layout } = await readTextualFile(file, source)
   if (source === 'txt') return pagesFromText(text)
   return pagesFromHtml(html || textToEditableHtml(text), layout)
+}
+
+async function readProjectFile(file: File): Promise<SavedProject> {
+  try {
+    return normalizeSavedProject(JSON.parse(await file.text()))
+  } catch {
+    throw new Error('Could not open that file.')
+  }
+}
+
+function readAutosavedProject(): SavedProject | null {
+  try {
+    const saved = localStorage.getItem(autosaveKey)
+    return saved ? normalizeSavedProject(JSON.parse(saved)) : null
+  } catch {
+    return null
+  }
+}
+
+function normalizeSavedProject(value: unknown): SavedProject {
+  if (!value || typeof value !== 'object') throw new Error('Could not open that file.')
+  const candidate = value as Partial<SavedProject>
+  if (candidate.version !== 1 || !Array.isArray(candidate.pages) || !candidate.pages.length) throw new Error('Could not open that file.')
+
+  const pages = candidate.pages.filter(isSavedPage).map((page) => ({
+    ...page,
+    images: page.images.map((image) => ({ ...image })),
+    size: page.size ?? defaultPageSizeKey,
+  }))
+  if (!pages.length) throw new Error('Could not open that file.')
+  const activePageId = typeof candidate.activePageId === 'string' && pages.some((page) => page.id === candidate.activePageId)
+    ? candidate.activePageId
+    : pages[0].id
+  const language: AppLanguage = candidate.language === 'de' || candidate.language === 'ar' ? candidate.language : 'en'
+  return { activePageId, language, pages, version: 1 }
+}
+
+function isSavedPage(value: unknown): value is PageData {
+  if (!value || typeof value !== 'object') return false
+  const page = value as Partial<PageData>
+  return typeof page.id === 'string' && typeof page.html === 'string' && Array.isArray(page.images) && page.images.every(isSavedImage)
+}
+
+function isSavedImage(value: unknown): value is FloatingImage {
+  if (!value || typeof value !== 'object') return false
+  const image = value as Partial<FloatingImage>
+  return [image.id, image.src].every((item) => typeof item === 'string') && [image.x, image.y, image.width, image.height, image.rotation].every((item) => typeof item === 'number' && Number.isFinite(item))
 }
 
 async function readDocxLayout(arrayBuffer: ArrayBuffer): Promise<Partial<Pick<PageData, 'fontFamily' | 'margins' | 'size'>>> {
@@ -2959,7 +3216,8 @@ async function readTextualFile(file: File, source: string) {
     const rawHtml = await file.text()
     const parser = new DOMParser()
     const body = parser.parseFromString(rawHtml, 'text/html').body
-    return { text: body.textContent ?? '', html: body.innerHTML }
+    const html = sanitizeImportedHtml(body.innerHTML)
+    return { text: textFromHtml(html), html }
   }
   throw new Error('Unsupported source file. Use DOCX, PDF, TXT, MD, HTML, PNG, or JPG.')
 }
@@ -2975,7 +3233,7 @@ function pagesFromHtml(html: string, layout: Partial<Pick<PageData, 'fontFamily'
     size: layout.size ?? defaultPageSizeKey,
   }
   const parser = new DOMParser()
-  const document = parser.parseFromString(`<main>${html || starterContent}</main>`, 'text/html')
+  const document = parser.parseFromString(`<main>${sanitizeImportedHtml(html || starterContent)}</main>`, 'text/html')
   const root = document.body.firstElementChild
   const atoms = Array.from(root?.childNodes ?? []).flatMap(htmlAtomsFromNode)
   const pageHtmls = paginateHtmlAtoms(atoms, normalizedLayout)
@@ -3230,6 +3488,43 @@ async function createDocxBlob(text: string, size: PageSizeKey = defaultPageSizeK
   return Packer.toBlob(docxDocument)
 }
 
+async function createDocxBlobFromPages(
+  pages: PageData[],
+  canvasDataUrlForPage?: (pageId: string) => string | undefined,
+) {
+  const safePages = pages.length ? pages : [{ id: createId(), html: starterContent, images: [], size: defaultPageSizeKey }]
+  const sections = await Promise.all(
+    safePages.map(async (page) => {
+      const size = pageSizeFor(page.size)
+      const canvas = await renderPageToCanvas(page, canvasDataUrlForPage?.(page.id), 2, 'png')
+      const imageData = await canvasToUint8Array(canvas, 'image/png')
+
+      return {
+        properties: {
+          page: {
+            margin: { top: 30, right: 30, bottom: 30, left: 30 },
+            size: { height: size.docxHeight, width: size.docxWidth },
+          },
+        },
+        children: [
+          new Paragraph({
+            children: [
+              new ImageRun({
+                data: imageData,
+                transformation: { height: Math.max(1, size.height - 4), width: Math.max(1, size.width - 4) },
+                type: 'png',
+              }),
+            ],
+            spacing: { after: 0, before: 0, line: 1 },
+          }),
+        ],
+      }
+    }),
+  )
+
+  return Packer.toBlob(new DocxDocument({ sections }))
+}
+
 async function textToImageBlob(text: string, format: 'png' | 'jpg') {
   const canvas = document.createElement('canvas')
   const context = canvas.getContext('2d')
@@ -3426,20 +3721,29 @@ th{background:#f2efff;}
 function saveBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob)
   saveDataUrl(url, fileName)
-  window.setTimeout(() => URL.revokeObjectURL(url), 300)
+  // Some browsers do not start an object-URL download synchronously. Keeping
+  // it alive briefly prevents zero-byte or cancelled downloads.
+  window.setTimeout(() => URL.revokeObjectURL(url), 2_000)
 }
 
 function saveDataUrl(url: string, fileName: string) {
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = fileName
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
   anchor.click()
+  anchor.remove()
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not export the canvas.'))), type, quality)
   })
+}
+
+async function canvasToUint8Array(canvas: HTMLCanvasElement, type: string) {
+  return new Uint8Array(await (await canvasToBlob(canvas, type)).arrayBuffer())
 }
 
 function loadImage(src: string) {
@@ -3560,8 +3864,22 @@ function sharpenCanvasText(object: FabricObject, options: { snapPosition?: boole
 
 function restoreManagedCanvasObjects(canvas: FabricCanvas) {
   canvas.getObjects().forEach((object) => {
+    applyCanvasSelectionStyle(object)
     sharpenCanvasText(object)
     if (isHorizontalTableGroup(object)) configureHorizontalTableGroup(object, canvas)
+  })
+}
+
+function applyCanvasSelectionStyle(object: FabricObject) {
+  object.set({
+    borderColor: '#7c5cff',
+    borderDashArray: [5, 4],
+    cornerColor: '#f9f7ff',
+    cornerSize: 11,
+    cornerStrokeColor: '#7c5cff',
+    cornerStyle: 'circle',
+    padding: 7,
+    transparentCorners: false,
   })
 }
 
@@ -4046,6 +4364,44 @@ function syncFabricTextarea(text: IText) {
 function textFromHtml(html: string) {
   const parser = new DOMParser()
   return parser.parseFromString(html, 'text/html').body.textContent ?? ''
+}
+
+function sanitizeImportedHtml(html: string) {
+  const parser = new DOMParser()
+  const document = parser.parseFromString(html, 'text/html')
+  document.querySelectorAll('base,embed,frame,iframe,link,meta,object,script,style,svg').forEach((element) => element.remove())
+  const allowedStyleProperties = new Set(['background-color', 'color', 'font-family', 'font-size', 'font-style', 'font-weight', 'text-align', 'text-decoration'])
+
+  document.body.querySelectorAll('*').forEach((element) => {
+    Array.from(element.attributes).forEach((attribute) => {
+      const name = attribute.name.toLowerCase()
+      const value = attribute.value.trim()
+      if (name.startsWith('on') || name === 'srcdoc') {
+        element.removeAttribute(attribute.name)
+        return
+      }
+      if (name === 'style') {
+        if (!(element instanceof HTMLElement)) {
+          element.removeAttribute('style')
+          return
+        }
+        const safeStyles = Array.from(element.style)
+          .filter((property) => allowedStyleProperties.has(property))
+          .map((property) => `${property}:${element.style.getPropertyValue(property)}`)
+        if (safeStyles.length) element.setAttribute('style', safeStyles.join(';'))
+        else element.removeAttribute('style')
+        return
+      }
+      if ((name === 'href' || name === 'src') && !isSafeImportedUrl(value, name === 'src')) element.removeAttribute(attribute.name)
+    })
+  })
+  return document.body.innerHTML
+}
+
+function isSafeImportedUrl(value: string, isImageSource: boolean) {
+  if (!value) return false
+  if (isImageSource && /^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(value)) return true
+  return /^(?:https?:|mailto:|tel:|#)/i.test(value)
 }
 
 function pageSizeFor(size: PageSizeKey = defaultPageSizeKey) {
